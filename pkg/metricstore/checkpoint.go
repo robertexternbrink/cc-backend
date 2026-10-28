@@ -76,6 +76,9 @@ type CheckpointFile struct {
 	Children map[string]*CheckpointFile    `json:"children"`
 	From     int64                         `json:"from"`
 	To       int64                         `json:"to"`
+	// Persistence bookkeeping is excluded from both on-disk formats.
+	level     *Level
+	persisted []*buffer
 }
 
 // lastCheckpoint tracks the timestamp of the last checkpoint creation.
@@ -126,11 +129,7 @@ func Checkpointing(wg *sync.WaitGroup, ctx context.Context) {
 				cclog.Infof("[METRICSTORE]> start checkpointing (starting at %s)...", from.Format(time.RFC3339))
 
 				if Keys.Checkpoints.FileFormat == "wal" {
-					// Pause WAL writes: the binary snapshot captures all in-memory
-					// data, so WAL records written during checkpoint are redundant
-					// and would be deleted during rotation anyway.
-					walCheckpointActive.Store(true)
-					n, hostDirs, err := ms.ToCheckpointWAL(Keys.Checkpoints.RootDir, from.Unix(), now.Unix())
+					n, _, err := ms.checkpointWAL(Keys.Checkpoints.RootDir, from.Unix(), now.Unix(), RotateWALFiles)
 					if err != nil {
 						cclog.Errorf("[METRICSTORE]> binary checkpointing failed: %s", err.Error())
 					}
@@ -139,10 +138,7 @@ func Checkpointing(wg *sync.WaitGroup, ctx context.Context) {
 						lastCheckpointMu.Lock()
 						lastCheckpoint = now
 						lastCheckpointMu.Unlock()
-						// Rotate WAL files for successfully checkpointed hosts.
-						RotateWALFiles(hostDirs)
 					}
-					walCheckpointActive.Store(false)
 					walDropped.Store(0)
 				} else {
 					n, err := ms.ToCheckpoint(Keys.Checkpoints.RootDir, from.Unix(), now.Unix())
@@ -188,11 +184,13 @@ func (cm *CheckpointMetrics) MarshalJSON() ([]byte, error) {
 // ToCheckpoint writes metric data to checkpoint files in parallel (JSON format).
 //
 // Metrics at root and cluster levels are skipped. One file per host is created.
-// Uses worker pool (Keys.NumWorkers) for parallel processing. Only locks one host
-// at a time, allowing concurrent writes/reads to other hosts.
+// Uses worker pool (Keys.NumWorkers) for parallel processing. Accepted writes and
+// retention are fenced until the snapshots commit; concurrent reads remain available.
 //
 // Returns the number of checkpoint files created and any errors encountered.
 func (m *MemoryStore) ToCheckpoint(dir string, from, to int64) (int, error) {
+	m.checkpointMu.Lock()
+	defer m.checkpointMu.Unlock()
 	// Pre-calculate capacity by counting cluster/host pairs
 	m.root.lock.RLock()
 	totalHosts := 0
@@ -276,6 +274,7 @@ func (l *Level) toCheckpointFile(from, to int64, m *MemoryStore) (*CheckpointFil
 		To:       to,
 		Metrics:  make(map[string]*CheckpointMetrics),
 		Children: make(map[string]*CheckpointFile),
+		level:    l,
 	}
 
 	for metric, minfo := range m.Metrics {
@@ -284,27 +283,33 @@ func (l *Level) toCheckpointFile(from, to int64, m *MemoryStore) (*CheckpointFil
 			continue
 		}
 
-		allArchived := true
-		b.iterFromTo(from, to, func(b *buffer) error {
-			if !b.archived {
-				allArchived = false
-				return fmt.Errorf("stop") // Early termination signal
+		// The wall-clock cursor is only a filename/order hint. Accepted
+		// backfills and overwrites may precede it, and future-dated samples
+		// must also survive WAL rotation. Persist the actual dirty coverage.
+		first, end := int64(0), b.end()
+		found := false
+		for cur := b; cur != nil; cur = cur.prev {
+			if cur.archived || len(cur.data) == 0 {
+				continue
 			}
-			return nil
-		})
-
-		if allArchived {
+			start := cur.firstWrite() + int64(cur.dirtyFrom)*cur.frequency
+			if !found || start < first {
+				first = start
+				found = true
+			}
+			retval.persisted = append(retval.persisted, cur)
+		}
+		if !found {
 			continue
 		}
 
-		data := make([]schema.Float, (to-from)/b.frequency+1)
-
-		// trim=true: read() returns only the real data extent, sliced so that
-		// Data[0] aligns with Start (the checkpoint reload contract).
-		data, start, _, err := b.read(from, to, data, true)
+		data := make([]schema.Float, (end-first)/b.frequency)
+		data, start, actualEnd, err := b.read(first, end, data, true)
 		if err != nil {
 			return nil, err
 		}
+		retval.From = min(retval.From, start)
+		retval.To = max(retval.To, actualEnd)
 
 		retval.Metrics[metric] = &CheckpointMetrics{
 			Frequency: b.frequency,
@@ -321,6 +326,8 @@ func (l *Level) toCheckpointFile(from, to int64, m *MemoryStore) (*CheckpointFil
 
 		if val != nil {
 			retval.Children[name] = val
+			retval.From = min(retval.From, val.From)
+			retval.To = max(retval.To, val.To)
 		}
 	}
 
@@ -329,6 +336,20 @@ func (l *Level) toCheckpointFile(from, to int64, m *MemoryStore) (*CheckpointFil
 	}
 
 	return retval, nil
+}
+
+// markPersisted is called only after committing a snapshot while checkpointMu
+// excludes writes and retention. Failed snapshots leave their dirty state intact.
+func (cf *CheckpointFile) markPersisted() {
+	cf.level.lock.Lock()
+	for _, b := range cf.persisted {
+		b.archived = true
+		b.dirtyFrom = len(b.data)
+	}
+	cf.level.lock.Unlock()
+	for _, child := range cf.Children {
+		child.markPersisted()
+	}
 }
 
 // toCheckpoint writes a Level's data to a JSON checkpoint file.
@@ -361,7 +382,14 @@ func (l *Level) toCheckpoint(dir string, from, to int64, m *MemoryStore) error {
 		return err
 	}
 
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	cf.markPersisted()
+	return nil
 }
 
 // enqueueCheckpointHosts traverses checkpoint directory and enqueues cluster/host pairs.
@@ -494,11 +522,12 @@ func (l *Level) loadFile(cf *CheckpointFile, m *MemoryStore) error {
 		n := len(metric.Data)
 		b := &buffer{
 			frequency: metric.Frequency,
-			start:     metric.Start,
+			start:     metric.Start - metric.Frequency/2,
 			data:      metric.Data[0:n:n],
 			prev:      nil,
 			next:      nil,
 			archived:  true,
+			dirtyFrom: n,
 		}
 		// Front-load the single scan so the first stat query hits the cache
 		// instead of lazily rescanning this checkpoint-loaded buffer.
@@ -509,18 +538,11 @@ func (l *Level) loadFile(cf *CheckpointFile, m *MemoryStore) error {
 			continue
 		}
 
-		prev := l.metrics[minfo.offset]
-		if prev == nil {
-			l.metrics[minfo.offset] = b
-		} else {
-			if prev.start > b.start {
-				return fmt.Errorf("[METRICSTORE]> buffer start time %d is before previous buffer start %d", b.start, prev.start)
-			}
-
-			b.prev = prev
-			prev.next = b
+		head, err := mergeCheckpointBuffer(l.metrics[minfo.offset], b)
+		if err != nil {
+			return err
 		}
-		l.metrics[minfo.offset] = b
+		l.metrics[minfo.offset] = head
 	}
 
 	if len(cf.Children) > 0 && l.children == nil {
@@ -543,6 +565,76 @@ func (l *Level) loadFile(cf *CheckpointFile, m *MemoryStore) error {
 	}
 
 	return nil
+}
+
+// mergeCheckpointBuffer overlays one persisted range without changing older
+// prefixes or newer suffixes. Checkpoints can overlap after a late overwrite;
+// merely appending the new range would leave the old values visible to reads.
+// The caller holds the level lock or is restoring before serving requests.
+func mergeCheckpointBuffer(head, incoming *buffer) (*buffer, error) {
+	if head == nil {
+		return incoming, nil
+	}
+	if incoming.frequency != head.frequency {
+		return nil, fmt.Errorf("[METRICSTORE]> overlapping checkpoint frequencies differ: %d and %d", incoming.frequency, head.frequency)
+	}
+	first, end := incoming.firstWrite(), incoming.end()
+	var old []*buffer
+	for cur := head; cur != nil; cur = cur.prev {
+		old = append(old, cur)
+	}
+	kept := make([]*buffer, 0, len(old)+2)
+	inserted := false
+	insert := func() {
+		if !inserted {
+			kept = append(kept, incoming)
+			inserted = true
+		}
+	}
+	for i := len(old) - 1; i >= 0; i-- {
+		cur := old[i]
+		if cur.end() <= first {
+			kept = append(kept, cur)
+			continue
+		}
+		if cur.firstWrite() >= end {
+			insert()
+			kept = append(kept, cur)
+			continue
+		}
+		if (first-cur.firstWrite())%cur.frequency != 0 {
+			return nil, errors.New("[METRICSTORE]> overlapping checkpoint samples are not aligned")
+		}
+		// Copy a surviving suffix before truncating the old prefix. This is
+		// normally absent for incremental checkpoints, but needed by WAL replay.
+		var suffix *buffer
+		if cur.end() > end {
+			index := int((end - cur.firstWrite()) / cur.frequency)
+			values := append([]schema.Float(nil), cur.data[index:]...)
+			suffix = &buffer{frequency: cur.frequency, start: end - cur.frequency/2, archived: cur.archived, data: values[:len(values):len(values)]}
+			suffix.recomputeStats()
+		}
+		if cur.firstWrite() < first {
+			n := int((first - cur.firstWrite()) / cur.frequency)
+			cur.data = cur.data[:n:n]
+			cur.dirtyFrom = min(cur.dirtyFrom, n)
+			cur.recomputeStats()
+			kept = append(kept, cur)
+		}
+		insert()
+		if suffix != nil {
+			kept = append(kept, suffix)
+		}
+	}
+	insert()
+	for i, cur := range kept {
+		cur.prev, cur.next = nil, nil
+		if i > 0 {
+			cur.prev = kept[i-1]
+			kept[i-1].next = cur
+		}
+	}
+	return kept[len(kept)-1], nil
 }
 
 // fromCheckpoint loads all checkpoint files (JSON, binary snapshot, WAL) for a

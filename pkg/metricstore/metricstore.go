@@ -100,6 +100,8 @@ type MemoryStore struct {
 	Metrics      map[string]MetricConfig
 	root         Level
 	nodeProvider NodeProvider
+	// checkpointMu fences accepted writes and retention through snapshot/WAL commit.
+	checkpointMu sync.RWMutex
 }
 
 // Init initializes the metric store from configuration and starts background workers.
@@ -336,14 +338,7 @@ func Shutdown() {
 	lastCheckpointMu.Unlock()
 
 	if Keys.Checkpoints.FileFormat == "wal" {
-		var successDirs []string
-		files, successDirs, err = ms.ToCheckpointWAL(Keys.Checkpoints.RootDir, from.Unix(), time.Now().Unix())
-		// The final binary snapshot now captures all in-memory data for these
-		// hosts, making their current.wal redundant. The staging goroutines have
-		// already exited, so remove the WAL files directly (the channel-based
-		// RotateWALFiles is no longer safe to call). Without this, current.wal
-		// files survive shutdown and keep growing across restarts.
-		RotateWALFilesAfterShutdown(successDirs)
+		files, _, err = ms.checkpointWAL(Keys.Checkpoints.RootDir, from.Unix(), time.Now().Unix(), RotateWALFilesAfterShutdown)
 	} else {
 		files, err = ms.ToCheckpoint(Keys.Checkpoints.RootDir, from.Unix(), time.Now().Unix())
 	}
@@ -594,6 +589,13 @@ func (m *MemoryStore) GetLevel(selector []string) *Level {
 
 // WriteToLevel assumes that `minfo` in `metrics` is filled in
 func (m *MemoryStore) WriteToLevel(l *Level, selector []string, ts int64, metrics []Metric) error {
+	m.checkpointMu.RLock()
+	defer m.checkpointMu.RUnlock()
+	return m.writeToLevel(l, selector, ts, metrics)
+}
+
+// writeToLevel requires checkpointMu to be held by the caller.
+func (m *MemoryStore) writeToLevel(l *Level, selector []string, ts int64, metrics []Metric) error {
 	if len(selector) > 0 {
 		l.lock.RLock()
 		child := l.children[selector[0]]
@@ -613,7 +615,7 @@ func (m *MemoryStore) WriteToLevel(l *Level, selector []string, ts int64, metric
 			defer l.lock.RUnlock()
 		}
 		// Retention must not remove an ancestor before the leaf is written.
-		return m.WriteToLevel(child, selector[1:], ts, metrics)
+		return m.writeToLevel(child, selector[1:], ts, metrics)
 	}
 
 	l.lock.Lock()
@@ -723,15 +725,21 @@ func (m *MemoryStore) Read(selector util.Selector, metric string, from, to, reso
 // Free releases all buffers for the selected level and all its children that
 // contain only values older than `t`.
 func (m *MemoryStore) Free(selector []string, t int64) (int, error) {
+	m.checkpointMu.RLock()
+	defer m.checkpointMu.RUnlock()
 	return m.GetLevel(selector).free(t)
 }
 
 // ForceFree unconditionally removes the oldest buffer from each metric chain.
 func (m *MemoryStore) ForceFree() (int, error) {
+	m.checkpointMu.RLock()
+	defer m.checkpointMu.RUnlock()
 	return m.GetLevel(nil).forceFree()
 }
 
 func (m *MemoryStore) FreeAll() error {
+	m.checkpointMu.RLock()
+	defer m.checkpointMu.RUnlock()
 	m.root.lock.Lock()
 	defer m.root.lock.Unlock()
 

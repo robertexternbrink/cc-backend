@@ -188,6 +188,8 @@ type buffer struct {
 	statMin     float64
 	statMax     float64
 	statsValid  bool
+	// dirtyFrom is the first sample changed since a successful checkpoint.
+	dirtyFrom int
 }
 
 func newBuffer(ts, freq int64) *buffer {
@@ -197,6 +199,7 @@ func newBuffer(ts, freq int64) *buffer {
 	b.prev = nil
 	b.next = nil
 	b.archived = false
+	b.dirtyFrom = 0
 	b.closed = false
 	b.data = b.data[:0]
 	b.statSum = 0
@@ -255,10 +258,15 @@ func (b *buffer) write(ts int64, value schema.Float) (*buffer, error) {
 		idx = 0
 	}
 
+	firstChanged := min(idx, len(b.data))
+	if b.archived || firstChanged < b.dirtyFrom {
+		b.dirtyFrom = firstChanged
+	}
+	b.archived = false
+
 	// Overwriting value or writing value from past
 	if idx < len(b.data) {
 		b.data[idx] = value
-		b.archived = false
 		// The replaced value may have been the running min/max; the cached
 		// aggregate can no longer be trusted. Force a recompute on next query.
 		b.statsValid = false
@@ -271,7 +279,6 @@ func (b *buffer) write(ts int64, value schema.Float) (*buffer, error) {
 	}
 
 	b.data = append(b.data, value)
-	b.archived = false
 	b.updateStats(value)
 	return b, nil
 }
