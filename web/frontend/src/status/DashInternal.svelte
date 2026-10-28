@@ -546,7 +546,7 @@
           <div>
             {#key $statusQuery?.data?.clusterMetrics}
               <DoubleMetric
-                timestep={$statusQuery?.data?.clusterMetrics[0]?.timestep || 60}
+                timestep={$statusQuery?.data?.clusterMetrics?.metrics?.[0]?.timestep || 60}
                 numNodes={$statusQuery?.data?.clusterMetrics?.nodeCount || 0}
                 metricData={$statusQuery?.data?.clusterMetrics?.metrics || []}
                 cluster={presetCluster}
