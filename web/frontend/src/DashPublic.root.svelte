@@ -524,14 +524,16 @@
       <!-- Total Cluster Metric in Time SUMS-->
       <Col class="text-center">
         <h5 class="mt-2 mb-0">
+          {#if sortedClusterMetrics?.length > 0}
           Cluster Utilization (
           <span style="color: #0000ff;">
             {`${sortedClusterMetrics[0]?.name} (${sortedClusterMetrics[0]?.unit?.prefix}${sortedClusterMetrics[0]?.unit?.base})`}
-          </span>,
+          </span>{#if sortedClusterMetrics.length > 1},
           <span style="color: #ff0000;">
             {`${sortedClusterMetrics[1]?.name} (${sortedClusterMetrics[1]?.unit?.prefix}${sortedClusterMetrics[1]?.unit?.base})`}
-          </span>
+          </span>{/if}
           )
+          {/if}
         </h5>
         <div>
           {#key $statusQuery?.data?.clusterMetrics}

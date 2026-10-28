@@ -3,9 +3,11 @@
 // Use of this source code is governed by a MIT-style
 // license that can be found in the LICENSE file.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {parse} from 'svelte/compiler';
+import {compile, parse} from 'svelte/compiler';
+import {render} from 'svelte/server';
 
 export const frontend = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -64,4 +66,32 @@ export function templateExpressions(relative, containing, context) {
   }
   visit(ast.html);
   return values;
+}
+
+// Render the actual header markup with Svelte's server renderer.
+export async function renderHeader(relative, containing, props) {
+  const {source, ast} = parsed(relative);
+  let element;
+  function visit(node) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'Element' && node.name === 'h5' && source.slice(node.start, node.end).includes(containing)) element = node;
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  }
+  visit(ast.html);
+  if (!element) throw new Error('Header fixture not found');
+  const markup = '<script>let {sortedClusterMetrics}=$props();</script>' + source.slice(element.start, element.end);
+  let code = compile(markup, {generate: 'server'}).js.code;
+  code = code.replace(/from ['"](svelte[^'"]+)['"]/g, (_, name) => `from ${JSON.stringify(import.meta.resolve(name))}`);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-header-'));
+  try {
+    const file = path.join(dir, 'Header.mjs');
+    fs.writeFileSync(file, code);
+    const {default: Header} = await import(file);
+    return render(Header, {props}).body.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  } finally {
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
 }
