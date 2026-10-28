@@ -305,8 +305,9 @@ func DecodeLine(dec *lineprotocol.Decoder,
 			continue
 		}
 
-		// If the cluster or host changed, the lvl was set to nil
-		if lvl == nil {
+		// Missing tags resolve to defaults rather than the previous line's tags.
+		// Compare the resolved pair even when neither tag was present on the wire.
+		if lvl == nil || cluster != prevCluster || host != prevHost {
 			st.selector = st.selector[:2]
 			st.selector[0], st.selector[1] = cluster, host
 			lvl = ms.GetLevel(st.selector)
