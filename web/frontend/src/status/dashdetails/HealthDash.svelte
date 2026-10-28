@@ -91,8 +91,12 @@
 
   let healthTableData = $derived.by(() => {
     if ($statusQuery?.data) {
+      const [field, sorting] = Object.entries(healthTableSorting).find(([, state]) => state.active)
+        || ["healthState", {dir: "down"}];
       return [...$statusQuery.data.nodes.items].sort((n1, n2) => {
-        return n1['healthState'].localeCompare(n2['healthState'])
+        return sorting.dir == "down"
+          ? n1[field].localeCompare(n2[field])
+          : n2[field].localeCompare(n1[field]);
       });
     } else {
       return [];
