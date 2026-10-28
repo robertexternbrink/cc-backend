@@ -59,7 +59,7 @@
     // X
     if (forNode === true) {
       // Negative Timestamp Buildup
-      for (let i = 0; i <= longestSeries; i++) {
+      for (let i = 0; i < longestSeries; i++) {
         pendingData[0][i] = (longestSeries - i) * timestep * -1;
       }
     } else {
@@ -87,7 +87,7 @@
     // Y
     for (let i = 0; i < sortedMetricData.length; i++) {
       pendingSeries.push({
-        label: publicMode ? null : `${sortedMetricData[i]?.name} (${sortedMetricData[i]?.unit?.prefix}${sortedMetricData[i]?.unit?.base})`,
+        label: publicMode ? null : `${sortedMetricData[i]?.name} (${sortedMetricData[i]?.unit?.prefix ?? ""}${sortedMetricData[i]?.unit?.base ?? ""})`,
         scale: `y${i+1}`,
         width: lineWidth,
         stroke: fixedLineColors[i],
@@ -157,9 +157,9 @@
       // X
       baseOpts.axes[0].label = 'Time';
       // Y1
-      baseOpts.axes[1].label = `${sortedMetricData[0]?.name} (${sortedMetricData[0]?.unit?.prefix}${sortedMetricData[0]?.unit?.base})`;
+      baseOpts.axes[1].label = `${sortedMetricData[0]?.name} (${sortedMetricData[0]?.unit?.prefix ?? ""}${sortedMetricData[0]?.unit?.base ?? ""})`;
       // Y2
-      baseOpts.axes[2].label = `${sortedMetricData[1]?.name} (${sortedMetricData[1]?.unit?.prefix}${sortedMetricData[1]?.unit?.base})`;
+      baseOpts.axes[2].label = `${sortedMetricData[1]?.name} (${sortedMetricData[1]?.unit?.prefix ?? ""}${sortedMetricData[1]?.unit?.base ?? ""})`;
       baseOpts.hooks.draw = [
         (u) => {
           // Draw plot type label:
