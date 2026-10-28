@@ -646,7 +646,7 @@ func (r *JobRepository) AddHistograms(
 		targetBinSize = 43200
 	default: // 24h
 		targetBinCount = 24
-		targetBinSize = 3600
+		targetBinSize = 86400
 	}
 
 	// Run all 4 histogram queries in parallel — each writes a distinct struct field.
