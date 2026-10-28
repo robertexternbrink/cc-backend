@@ -114,7 +114,8 @@ func (ccms *InternalMetricStore) LoadData(
 		ResampleAlgo: resampleAlgo,
 	}
 
-	resBody, err := FetchData(req)
+	var positions [][]int
+	resBody, err := fetchData(req, &positions)
 	if err != nil {
 		cclog.Errorf("Error while fetching data : %s", err.Error())
 		return schema.JobData{}, err
@@ -175,7 +176,7 @@ func (ccms *InternalMetricStore) LoadData(
 
 			id := target.ID
 			if !query.Aggregate {
-				id = ExtractTypeID(query.Type, query.TypeIds, ndx, query.Metric, query.Hostname)
+				id = ExtractTypeID(query.Type, query.TypeIds, positions[i][ndx], query.Metric, query.Hostname)
 			}
 
 			SanitizeStats(&res.Avg, &res.Min, &res.Max)
@@ -450,7 +451,8 @@ func (ccms *InternalMetricStore) LoadScopedStats(
 		WithData:  false,
 	}
 
-	resBody, err := FetchData(req)
+	var positions [][]int
+	resBody, err := fetchData(req, &positions)
 	if err != nil {
 		cclog.Errorf("Error while fetching data : %s", err.Error())
 		return schema.ScopedJobStats{}, err
@@ -486,7 +488,7 @@ func (ccms *InternalMetricStore) LoadScopedStats(
 
 			id := target.ID
 			if !query.Aggregate {
-				id = ExtractTypeID(query.Type, query.TypeIds, ndx, query.Metric, query.Hostname)
+				id = ExtractTypeID(query.Type, query.TypeIds, positions[i][ndx], query.Metric, query.Hostname)
 			}
 
 			SanitizeStats(&res.Avg, &res.Min, &res.Max)
@@ -681,7 +683,8 @@ func (ccms *InternalMetricStore) LoadNodeListData(
 		ResampleAlgo: resampleAlgo,
 	}
 
-	resBody, err := FetchData(req)
+	var positions [][]int
+	resBody, err := fetchData(req, &positions)
 	if err != nil {
 		cclog.Errorf("Error while fetching data : %s", err.Error())
 		return nil, err
@@ -762,7 +765,7 @@ func (ccms *InternalMetricStore) LoadNodeListData(
 
 			id := target.ID
 			if !query.Aggregate {
-				id = ExtractTypeID(query.Type, query.TypeIds, ndx, query.Metric, query.Hostname)
+				id = ExtractTypeID(query.Type, query.TypeIds, positions[i][ndx], query.Metric, query.Hostname)
 			}
 
 			SanitizeStats(&res.Avg, &res.Min, &res.Max)
@@ -859,6 +862,7 @@ func buildNodeQueries(
 			handledScopes = append(handledScopes, scope)
 
 			for _, hostname := range nodes {
+				resolvedSubCluster := subCluster
 
 				// If no subCluster given, get it by node
 				if subCluster == "" {
@@ -870,6 +874,10 @@ func buildNodeQueries(
 					if scterr != nil {
 						return nil, nil, scterr
 					}
+					resolvedSubCluster = subClusterName
+				}
+				if IsMetricRemovedForSubCluster(mc, resolvedSubCluster) {
+					continue
 				}
 
 				// Always full node hwthread id list, no partial queries expected

@@ -200,6 +200,11 @@ func (data *APIMetricData) PadDataWithNull(ms *MemoryStore, from, to int64, metr
 //   - Error if MemoryStore is not initialized
 //   - Individual query errors are stored in APIMetricData.Error field
 func FetchData(req APIQueryRequest) (*APIQueryResponse, error) {
+	return fetchData(req, nil)
+}
+
+// fetchData optionally preserves selector positions for internal series identities.
+func fetchData(req APIQueryRequest, positions *[][]int) (*APIQueryResponse, error) {
 	if req.From > req.To {
 		return nil, ErrInvalidTimeRange
 	}
@@ -223,7 +228,8 @@ func FetchData(req APIQueryRequest) (*APIQueryResponse, error) {
 
 		var err error
 		res := make([]APIMetricData, 0, len(sels))
-		for _, sel := range sels {
+		var selected []int
+		for selectorIndex, sel := range sels {
 			data := APIMetricData{}
 
 			data.Data, data.From, data.To, data.Resolution, err = ms.Read(sel, query.Metric, req.From, req.To, query.Resolution, req.ResampleAlgo)
@@ -234,6 +240,9 @@ func FetchData(req APIQueryRequest) (*APIQueryResponse, error) {
 					msg := err.Error()
 					data.Error = &msg
 					res = append(res, data)
+					if positions != nil {
+						selected = append(selected, selectorIndex)
+					}
 				} else {
 					cclog.Debugf("failed to fetch '%s' from host '%s' (cluster: %s): %s", query.Metric, query.Hostname, req.Cluster, err.Error())
 				}
@@ -253,6 +262,12 @@ func FetchData(req APIQueryRequest) (*APIQueryResponse, error) {
 				data.Data = nil
 			}
 			res = append(res, data)
+			if positions != nil {
+				selected = append(selected, selectorIndex)
+			}
+		}
+		if positions != nil {
+			*positions = append(*positions, selected)
 		}
 		response.Results = append(response.Results, res)
 	}
