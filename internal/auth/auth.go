@@ -66,14 +66,15 @@ var (
 // getIPUserLimiter returns a rate limiter for the given IP and username combination.
 // Rate limiters are created on demand and track 5 attempts per 15 minutes.
 func getIPUserLimiter(ip, username string) *rate.Limiter {
+	ipUserLimitersMutex.Lock()
+	defer ipUserLimitersMutex.Unlock()
+
 	key := ip + ":" + username
 	now := time.Now()
 
 	if entry, ok := ipUserLimiters.Load(key); ok {
 		rle := entry.(*rateLimiterEntry)
-		ipUserLimitersMutex.Lock()
 		rle.lastUsed = now
-		ipUserLimitersMutex.Unlock()
 		return rle.limiter
 	}
 
