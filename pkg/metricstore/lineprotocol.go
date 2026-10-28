@@ -68,11 +68,16 @@ type metricNatsMessage struct {
 }
 
 func receiveNats(ms *MemoryStore, workers int, ctx context.Context, nc metricSubscriptionClient) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var wg sync.WaitGroup
+	var subscriptionErr error
 	msgs := make(chan metricNatsMessage, max(workers*256, 8192))
 
 	for _, sc := range *Keys.Subscriptions {
 		clusterTag := sc.ClusterTag
+		var err error
 		if workers > 1 {
 			wg.Add(workers)
 
@@ -88,19 +93,24 @@ func receiveNats(ms *MemoryStore, workers int, ctx context.Context, nc metricSub
 				}()
 			}
 
-			nc.Subscribe(sc.SubscribeTo, func(subject string, data []byte) {
+			err = nc.Subscribe(sc.SubscribeTo, func(subject string, data []byte) {
 				select {
 				case msgs <- metricNatsMessage{data: data, clusterTag: clusterTag}:
 				case <-ctx.Done():
 				}
 			})
 		} else {
-			nc.Subscribe(sc.SubscribeTo, func(subject string, data []byte) {
+			err = nc.Subscribe(sc.SubscribeTo, func(subject string, data []byte) {
 				dec := lineprotocol.NewDecoderWithBytes(data)
 				if err := DecodeLine(dec, ms, clusterTag); err != nil {
 					cclog.Errorf("error: %s", err.Error())
 				}
 			})
+		}
+		if err != nil {
+			subscriptionErr = fmt.Errorf("metric NATS subscription %q: %w", sc.SubscribeTo, err)
+			cancel()
+			break
 		}
 		cclog.Infof("NATS subscription to '%s' established", sc.SubscribeTo)
 	}
@@ -112,7 +122,7 @@ func receiveNats(ms *MemoryStore, workers int, ctx context.Context, nc metricSub
 
 	wg.Wait()
 
-	return nil
+	return subscriptionErr
 }
 
 // reorder prepends prefix to buf in-place when buf has enough spare capacity,
