@@ -11,7 +11,7 @@
 // chain of fixed-size buffers to store time-series data. This design:
 //
 //   - Avoids reallocation/copying when growing (new links added instead)
-//   - Enables efficient pooling (buffers returned to sync.Pool)
+//   - Enables efficient pooling (buffers returned to a bounded reusable pool)
 //   - Supports traversal back in time (via prev pointers)
 //   - Maintains temporal ordering (newer data in later buffers)
 //
@@ -26,7 +26,7 @@
 //
 // # Pooling Strategy
 //
-// sync.Pool reduces GC pressure for the common case (BufferCap-sized allocations).
+// A bounded persistent pool reduces GC pressure for BufferCap-sized allocations.
 // Non-standard capacity buffers are not pooled (e.g., from checkpoint deserialization).
 //
 // # Time Alignment
@@ -55,6 +55,10 @@ import (
 // of data or reallocation needs to happen on writes.
 const BufferCap int = DefaultBufferCapacity
 
+// DefaultBufferPoolCapacity limits idle sample arrays to approximately 64 MiB.
+// Retired history must not remain in an equally large long-lived buffer pool.
+const DefaultBufferPoolCapacity = 16 * 1024
+
 // BufferPool is the global instance.
 // It is initialized immediately when the package loads.
 var bufferPool = NewPersistentBufferPool()
@@ -64,7 +68,7 @@ type PersistentBufferPool struct {
 	mu   sync.Mutex
 }
 
-// NewPersistentBufferPool creates a dynamic pool for buffers.
+// NewPersistentBufferPool creates a bounded pool for reusable buffers.
 func NewPersistentBufferPool() *PersistentBufferPool {
 	return &PersistentBufferPool{
 		pool: make([]*buffer, 0),
@@ -93,12 +97,21 @@ func (p *PersistentBufferPool) Get() *buffer {
 // Put returns b to the pool. The caller must set b.lastUsed = time.Now().Unix()
 // before calling Put so that Clean() can evict idle entries correctly.
 func (p *PersistentBufferPool) Put(b *buffer) {
+	// Restored arrays can have arbitrary capacity. Discard them without allocating
+	// replacement sample arrays while trying to release history.
+	b.prev, b.next = nil, nil
+	if cap(b.data) != BufferCap {
+		return
+	}
 	// Reset the buffer before putting it back
 	b.data = b.data[:0]
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if len(p.pool) >= DefaultBufferPoolCapacity {
+		return
+	}
 	p.pool = append(p.pool, b)
 }
 
@@ -460,9 +473,6 @@ func (b *buffer) free(t int64) (delme bool, n int) {
 		n += m
 		if delme {
 			b.prev.next = nil
-			if cap(b.prev.data) != BufferCap {
-				b.prev.data = make([]schema.Float, 0, BufferCap)
-			}
 			b.prev.lastUsed = time.Now().Unix()
 			bufferPool.Put(b.prev)
 			b.prev = nil
@@ -491,9 +501,6 @@ func (b *buffer) forceFreeOldest() (delme bool, n int) {
 		// If the previous buffer signals it should be deleted:
 		if delPrev {
 			b.prev.next = nil
-			if cap(b.prev.data) != BufferCap {
-				b.prev.data = make([]schema.Float, 0, BufferCap)
-			}
 			b.prev.lastUsed = time.Now().Unix()
 			bufferPool.Put(b.prev)
 			b.prev = nil
