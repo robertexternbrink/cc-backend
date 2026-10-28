@@ -3,6 +3,7 @@
   "version": "1.5.3",
   "license": "MIT",
   "scripts": {
+    "test": "node --test --test-concurrency=1 --test-timeout=60000 test/*.test.mjs",
     "build": "rollup -c",
     "dev": "rollup -c -w"
   },
@@ -11,6 +12,7 @@
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-terser": "^1.0.0",
     "@timohausmann/quadtree-js": "^1.2.6",
+    "playwright": "1.61.1",
     "rollup": "^4.59.0",
     "rollup-plugin-css-only": "^4.5.5",
     "rollup-plugin-svelte": "^7.2.3",

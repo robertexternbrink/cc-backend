@@ -46,7 +46,8 @@
 
   /* Effects */
   $effect(() => {
-    sizeChanged(width, height);
+    // Svelte tracks synchronous reads; the delayed draw alone cannot track props.
+    sizeChanged(width, height, X, Y, S, color, xLabel, yLabel);
   });
 
   /* Functions */
