@@ -126,7 +126,6 @@ func LoadData(job *schema.Job,
 					return err, 0, 0
 				}
 			}
-			size = plotCacheSize(jd)
 		} else {
 			var jdTemp schema.JobData
 			jdTemp, err = archive.GetHandle().LoadJobData(job)
@@ -189,7 +188,6 @@ func LoadData(job *schema.Job,
 				}
 				jd = res
 			}
-			size = plotCacheSize(jd)
 		}
 
 		ttl = 5 * time.Hour
@@ -227,6 +225,8 @@ func LoadData(job *schema.Job,
 		// Round Resulting Stat Values
 		jd.RoundMetricStats()
 
+		// Charge the cached result after selection, resampling and added statistics/scopes.
+		size = plotCacheSize(jd)
 		return jd, ttl, size
 	})
 
