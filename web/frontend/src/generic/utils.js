@@ -280,15 +280,16 @@ export function stickyHeader(datatableHeaderSelector, updatePading) {
     if (!header) return;
 
     let ticking = false,
-        datatableHeader = null;
+        animationFrame = null;
     const onscroll = (event) => {
         if (ticking) return;
 
         ticking = true;
-        window.requestAnimationFrame(() => {
+        animationFrame = window.requestAnimationFrame(() => {
             ticking = false;
-            if (!datatableHeader)
-                datatableHeader = document.querySelector(datatableHeaderSelector);
+            animationFrame = null;
+            const datatableHeader = document.querySelector(datatableHeaderSelector);
+            if (!datatableHeader) return;
 
             const top = datatableHeader.getBoundingClientRect().top;
             updatePading(
@@ -298,7 +299,10 @@ export function stickyHeader(datatableHeaderSelector, updatePading) {
     };
 
     document.addEventListener("scroll", onscroll);
-    onDestroy(() => document.removeEventListener("scroll", onscroll));
+    onDestroy(() => {
+        document.removeEventListener("scroll", onscroll);
+        if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+    });
 }
 
 export function checkMetricAvailability(gms, m, c, s = "") { // [g]lobal[m]etrics, [m]etric, [c]luster, [s]ubcluster
