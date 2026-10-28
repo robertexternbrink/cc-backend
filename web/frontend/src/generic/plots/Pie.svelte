@@ -122,11 +122,11 @@
   })
 
   const data = $derived({
-    labels: entities,
+    labels: [...entities],
     datasets: [
       {
         label: sliceLabel,
-        data: quantities,
+        data: [...quantities],
         fill: 1,
         backgroundColor: colorPalette,
       }
