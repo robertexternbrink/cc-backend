@@ -520,6 +520,7 @@
             u.ctx.lineTo(u.bbox.left + u.bbox.width, y);
             u.ctx.stroke();
             u.ctx.restore();
+            u.ctx.restore();
           },
         ],
         setScale: [
