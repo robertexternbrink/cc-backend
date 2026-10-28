@@ -115,30 +115,8 @@ func RegisterNodeStateRetentionMoveService(cfgPtr *config.NodeStateRetention) {
 				}
 
 				cclog.Infof("NodeState move retention: archiving %d rows", len(rows))
-				pw := pqarchive.NewNodeStateParquetWriter(target, maxFileSizeMB)
-
-				for _, ns := range rows {
-					row := pqarchive.ParquetNodeStateRow{
-						TimeStamp:       ns.TimeStamp,
-						NodeState:       ns.NodeState,
-						HealthState:     ns.HealthState,
-						HealthMetrics:   ns.HealthMetrics,
-						CpusAllocated:   int32(ns.CpusAllocated),
-						MemoryAllocated: ns.MemoryAllocated,
-						GpusAllocated:   int32(ns.GpusAllocated),
-						JobsRunning:     int32(ns.JobsRunning),
-						Hostname:        ns.Hostname,
-						Cluster:         ns.Cluster,
-						SubCluster:      ns.SubCluster,
-					}
-					if err := pw.AddRow(row); err != nil {
-						cclog.Errorf("NodeState move retention: add row: %v", err)
-						continue
-					}
-				}
-
-				if err := pw.Close(); err != nil {
-					cclog.Errorf("NodeState move retention: close writer: %v", err)
+				if err := transferNodeStatesParquet(rows, target, maxFileSizeMB); err != nil {
+					cclog.Errorf("NodeState move retention: transfer: %v", err)
 					return
 				}
 
@@ -149,4 +127,34 @@ func RegisterNodeStateRetentionMoveService(cfgPtr *config.NodeStateRetention) {
 					cclog.Infof("NodeState move retention: deleted %d rows from db", cnt)
 				}
 			}))
+}
+
+// transferNodeStatesParquet completes the export before source rows may be deleted.
+func transferNodeStatesParquet(rows []repository.NodeStateWithNode, target pqarchive.ParquetTarget, maxSizeMB int) error {
+	pw := pqarchive.NewNodeStateParquetWriter(target, maxSizeMB)
+
+	for _, ns := range rows {
+		row := pqarchive.ParquetNodeStateRow{
+			TimeStamp:       ns.TimeStamp,
+			NodeState:       ns.NodeState,
+			HealthState:     ns.HealthState,
+			HealthMetrics:   ns.HealthMetrics,
+			CpusAllocated:   int32(ns.CpusAllocated),
+			MemoryAllocated: ns.MemoryAllocated,
+			GpusAllocated:   int32(ns.GpusAllocated),
+			JobsRunning:     int32(ns.JobsRunning),
+			Hostname:        ns.Hostname,
+			Cluster:         ns.Cluster,
+			SubCluster:      ns.SubCluster,
+		}
+		if err := pw.AddRow(row); err != nil {
+			return fmt.Errorf("node-state retention: add row: %w", err)
+		}
+	}
+
+	if err := pw.Close(); err != nil {
+		cclog.Errorf("NodeState move retention: close writer: %v", err)
+		return err
+	}
+	return nil
 }
