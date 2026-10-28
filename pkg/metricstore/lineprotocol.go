@@ -59,12 +59,12 @@ func ReceiveNats(ms *MemoryStore,
 }
 
 type metricSubscriptionClient interface {
-    Subscribe(string, nats.MessageHandler) error
+	Subscribe(string, nats.MessageHandler) error
 }
 
 type metricNatsMessage struct {
-    data []byte
-    clusterTag string
+	data       []byte
+	clusterTag string
 }
 
 func receiveNats(ms *MemoryStore, workers int, ctx context.Context, nc metricSubscriptionClient) error {
@@ -74,6 +74,29 @@ func receiveNats(ms *MemoryStore, workers int, ctx context.Context, nc metricSub
 	var wg sync.WaitGroup
 	var subscriptionErr error
 	msgs := make(chan metricNatsMessage, max(workers*256, 8192))
+	var deliveryMu sync.RWMutex
+	stopped := false
+	deliver := func(clusterTag string, data []byte) {
+		// Close does not join NATS callbacks already in progress. Gate every
+		// delivery against cancellation, then wait for active deliveries before
+		// closing the queue. Single-worker decoding participates in the same gate.
+		deliveryMu.RLock()
+		defer deliveryMu.RUnlock()
+		if stopped || ctx.Err() != nil {
+			return
+		}
+		if workers > 1 {
+			select {
+			case msgs <- metricNatsMessage{data: data, clusterTag: clusterTag}:
+			case <-ctx.Done():
+			}
+			return
+		}
+		dec := lineprotocol.NewDecoderWithBytes(data)
+		if err := DecodeLine(dec, ms, clusterTag); err != nil {
+			cclog.Errorf("error: %s", err.Error())
+		}
+	}
 
 	for _, sc := range *Keys.Subscriptions {
 		clusterTag := sc.ClusterTag
@@ -93,20 +116,10 @@ func receiveNats(ms *MemoryStore, workers int, ctx context.Context, nc metricSub
 				}()
 			}
 
-			err = nc.Subscribe(sc.SubscribeTo, func(subject string, data []byte) {
-				select {
-				case msgs <- metricNatsMessage{data: data, clusterTag: clusterTag}:
-				case <-ctx.Done():
-				}
-			})
-		} else {
-			err = nc.Subscribe(sc.SubscribeTo, func(subject string, data []byte) {
-				dec := lineprotocol.NewDecoderWithBytes(data)
-				if err := DecodeLine(dec, ms, clusterTag); err != nil {
-					cclog.Errorf("error: %s", err.Error())
-				}
-			})
 		}
+		err = nc.Subscribe(sc.SubscribeTo, func(subject string, data []byte) {
+			deliver(clusterTag, data)
+		})
 		if err != nil {
 			subscriptionErr = fmt.Errorf("metric NATS subscription %q: %w", sc.SubscribeTo, err)
 			cancel()
@@ -115,11 +128,11 @@ func receiveNats(ms *MemoryStore, workers int, ctx context.Context, nc metricSub
 		cclog.Infof("NATS subscription to '%s' established", sc.SubscribeTo)
 	}
 
-	go func() {
-		<-ctx.Done()
-		close(msgs)
-	}()
-
+	<-ctx.Done()
+	deliveryMu.Lock()
+	stopped = true
+	close(msgs)
+	deliveryMu.Unlock()
 	wg.Wait()
 
 	return subscriptionErr

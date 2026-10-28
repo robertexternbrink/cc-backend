@@ -376,13 +376,15 @@ func TestNatsShutdownDrainsAcceptedMetrics(t *testing.T) {
 
 // Snapshot actual host levels under the current tree's read locks.
 func ingestionHostPaths(store *MemoryStore) [][]string {
-    store.root.lock.RLock()
-    defer store.root.lock.RUnlock()
-    var paths [][]string
-    for cluster, level := range store.root.children {
-        level.lock.RLock()
-        for host := range level.children { paths=append(paths,[]string{cluster,host}) }
-        level.lock.RUnlock()
-    }
-    return paths
+	store.root.lock.RLock()
+	defer store.root.lock.RUnlock()
+	var paths [][]string
+	for cluster, level := range store.root.children {
+		level.lock.RLock()
+		for host := range level.children {
+			paths = append(paths, []string{cluster, host})
+		}
+		level.lock.RUnlock()
+	}
+	return paths
 }
