@@ -347,7 +347,11 @@
 
   function transformJobsStatsToInfo(clusterData) {
     if (clusterData) {
-        return clusterData.map((sc) => { return {id: sc.id, jobId: sc.jobId, numNodes: sc.numNodes, numAcc: sc?.numAccelerators? sc.numAccelerators : 0, duration: formatDurationTime(sc.duration)} })
+        return clusterData.filter((sc) => {
+          const f = sc.stats.find(s => s.name == "flops_any").data.avg;
+          const m = sc.stats.find(s => s.name == "mem_bw").data.avg;
+          return Number.isFinite(f / m);
+        }).map((sc) => { return {id: sc.id, jobId: sc.jobId, numNodes: sc.numNodes, numAcc: sc?.numAccelerators? sc.numAccelerators : 0, duration: formatDurationTime(sc.duration)} })
     } else {
         console.warn("transformJobsStatsToInfo: jobInfo missing!")
         return []
