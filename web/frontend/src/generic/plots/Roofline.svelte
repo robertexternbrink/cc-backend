@@ -995,6 +995,7 @@
 
   /* On Destroy */
   onDestroy(() => {
+    window.removeEventListener('dppxchange', setPxRatio);
     if (uplot) uplot.destroy();
     if (timeoutId != null) clearTimeout(timeoutId);
   });

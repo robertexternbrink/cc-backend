@@ -112,16 +112,16 @@ export function init(extraInitQuery = "") {
         if (typeof cluster !== "object")
             cluster = clusters.find((c) => c.name == cluster);
         if (typeof subCluster !== "object")
-            subCluster = cluster.subClusters.find((sc) => sc.name == subCluster);
+            subCluster = cluster?.subClusters?.find((sc) => sc.name == subCluster);
 
-        return subCluster.metricConfig.find((m) => m.name == metric);
+        return subCluster?.metricConfig?.find((m) => m.name == metric);
     });
     setContext("getHardwareTopology", (cluster, subCluster) => {
         // Load objects if input is string
         if (typeof cluster !== "object")
             cluster = clusters.find((c) => c.name == cluster);
         if (typeof subCluster !== "object")
-            subCluster = cluster.subClusters.find((sc) => sc.name == subCluster);
+            subCluster = cluster?.subClusters?.find((sc) => sc.name == subCluster);
 
         return subCluster?.topology;
     });

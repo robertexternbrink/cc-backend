@@ -128,7 +128,7 @@
 
   /* On Mount */
   onMount(() => {
-    new Chart(
+    const chart = new Chart(
       document.getElementById(canvasId),
       {
         type: 'radar',
@@ -136,6 +136,7 @@
         options: options
       }
     );
+    return () => chart.destroy();
   });
 </script>
 

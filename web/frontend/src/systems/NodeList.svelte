@@ -128,7 +128,7 @@
   /* Effects */
   $effect(() => {
     if (!usePaging) {
-      window.addEventListener('scroll', () => {
+      const onScroll = () => {
         let {
           scrollTop,
           scrollHeight,
@@ -139,7 +139,9 @@
         if (scrollTop + clientHeight >= scrollHeight - 100  && $nodesStore?.data?.nodeMetricsList?.hasNextPage) {
           page += 1
         };
-      });
+      };
+      window.addEventListener('scroll', onScroll);
+      return () => window.removeEventListener('scroll', onScroll);
     };
   });
 
