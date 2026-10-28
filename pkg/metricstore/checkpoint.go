@@ -509,18 +509,11 @@ func (l *Level) loadFile(cf *CheckpointFile, m *MemoryStore) error {
 			continue
 		}
 
-		prev := l.metrics[minfo.offset]
-		if prev == nil {
-			l.metrics[minfo.offset] = b
-		} else {
-			if prev.start > b.start {
-				return fmt.Errorf("[METRICSTORE]> buffer start time %d is before previous buffer start %d", b.start, prev.start)
-			}
-
-			b.prev = prev
-			prev.next = b
+		head, err := mergeCheckpointBuffer(l.metrics[minfo.offset], b)
+		if err != nil {
+			return err
 		}
-		l.metrics[minfo.offset] = b
+		l.metrics[minfo.offset] = head
 	}
 
 	if len(cf.Children) > 0 && l.children == nil {
@@ -543,6 +536,75 @@ func (l *Level) loadFile(cf *CheckpointFile, m *MemoryStore) error {
 	}
 
 	return nil
+}
+
+// mergeCheckpointBuffer overlays one persisted range without changing older
+// prefixes or newer suffixes. Checkpoints can overlap after a late overwrite;
+// merely appending the new range would leave the old values visible to reads.
+// The caller holds the level lock or is restoring before serving requests.
+func mergeCheckpointBuffer(head, incoming *buffer) (*buffer, error) {
+	if head == nil {
+		return incoming, nil
+	}
+	if incoming.frequency != head.frequency {
+		return nil, fmt.Errorf("[METRICSTORE]> overlapping checkpoint frequencies differ: %d and %d", incoming.frequency, head.frequency)
+	}
+	first, end := incoming.firstWrite(), incoming.end()
+	var old []*buffer
+	for cur := head; cur != nil; cur = cur.prev {
+		old = append(old, cur)
+	}
+	kept := make([]*buffer, 0, len(old)+2)
+	inserted := false
+	insert := func() {
+		if !inserted {
+			kept = append(kept, incoming)
+			inserted = true
+		}
+	}
+	for i := len(old) - 1; i >= 0; i-- {
+		cur := old[i]
+		if cur.end() <= first {
+			kept = append(kept, cur)
+			continue
+		}
+		if cur.firstWrite() >= end {
+			insert()
+			kept = append(kept, cur)
+			continue
+		}
+		if (first-cur.firstWrite())%cur.frequency != 0 {
+			return nil, errors.New("[METRICSTORE]> overlapping checkpoint samples are not aligned")
+		}
+		// Copy a surviving suffix before truncating the old prefix. This is
+		// normally absent for incremental checkpoints, but needed by WAL replay.
+		var suffix *buffer
+		if cur.end() > end {
+			index := int((end - cur.firstWrite()) / cur.frequency)
+			values := append([]schema.Float(nil), cur.data[index:]...)
+			suffix = &buffer{frequency: cur.frequency, start: end - cur.frequency/2, archived: cur.archived, data: values[:len(values):len(values)]}
+			suffix.recomputeStats()
+		}
+		if cur.firstWrite() < first {
+			n := int((first - cur.firstWrite()) / cur.frequency)
+			cur.data = cur.data[:n:n]
+			cur.recomputeStats()
+			kept = append(kept, cur)
+		}
+		insert()
+		if suffix != nil {
+			kept = append(kept, suffix)
+		}
+	}
+	insert()
+	for i, cur := range kept {
+		cur.prev, cur.next = nil, nil
+		if i > 0 {
+			cur.prev = kept[i-1]
+			kept[i-1].next = cur
+		}
+	}
+	return kept[len(kept)-1], nil
 }
 
 // fromCheckpoint loads all checkpoint files (JSON, binary snapshot, WAL) for a

@@ -636,16 +636,44 @@ func (l *Level) loadWALFile(m *MemoryStore, f *os.File, from int64) error {
 			b = newBuffer(msg.Timestamp, minfo.Frequency)
 			lvl.metrics[minfo.offset] = b
 		}
-		nb, writeErr := b.write(msg.Timestamp, msg.Value)
+		nb, writeErr := replayWALValue(b, msg.Timestamp, msg.Value)
 		if writeErr == nil && b != nb {
 			lvl.metrics[minfo.offset] = nb
 		}
-		// Ignore write errors for timestamps before buffer start (can happen when
-		// replaying WAL entries that predate a loaded snapshot's start time).
 		lvl.lock.Unlock()
+		if writeErr != nil {
+			return fmt.Errorf("[METRICSTORE]> WAL replay at %d: %w", msg.Timestamp, writeErr)
+		}
 	}
 
 	return nil
+}
+
+// replayWALValue can update older persisted links. Normal ingestion accepts
+// only writes into the head, but replay must also recover backfills preceding
+// a later incremental snapshot, including records in gaps between snapshots.
+func replayWALValue(head *buffer, ts int64, value schema.Float) (*buffer, error) {
+	if ts >= head.start {
+		return head.write(ts, value)
+	}
+	for cur := head.prev; cur != nil; cur = cur.prev {
+		if ts < cur.start {
+			continue
+		}
+		if ts < cur.start+int64(cap(cur.data))*cur.frequency && (cur.next == nil || ts < cur.next.start) {
+			if _, err := cur.write(ts, value); err != nil {
+				return nil, err
+			}
+			return head, nil
+		}
+		break
+	}
+	b := newBuffer(ts, head.frequency)
+	if _, err := b.write(ts, value); err != nil {
+		return nil, err
+	}
+	b.data = b.data[:1:1]
+	return mergeCheckpointBuffer(head, b)
 }
 
 // joinSelector builds a cache key from a selector slice using null bytes as separators.
