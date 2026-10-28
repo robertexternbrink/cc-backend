@@ -281,7 +281,7 @@
 
   // UPLOT SERIES INIT: DERIVED FROM PROPS
   // Data Prep For uPlot
-  const sortedData = $derived(data?.sort((a, b) => a.state.localeCompare(b.state)) || []);
+  const sortedData = $derived(data?.slice().sort((a, b) => a.state.localeCompare(b.state)) || []);
   const collectLabel = $derived(sortedData.map(d => d.state));
   // Align Data to Timesteps, Introduces 'undefied' as placeholder, reiterate and set those to 0
   const collectData = $derived.by(() => {

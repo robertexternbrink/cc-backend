@@ -24,7 +24,7 @@
 
   /* Functions */
   function updateData(data, sortBy, sortDir) {
-    data.sort((a, b) => {
+    const sorted = [...data].sort((a, b) => {
       if (a == null || b == null) { 
         return -1;
       } else if (sortBy === "id") {
@@ -37,7 +37,7 @@
           : b.data[sortBy] - a.data[sortBy];
       };
     });
-    return [...data];
+    return sorted;
   };
 </script>
 
