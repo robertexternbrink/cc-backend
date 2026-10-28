@@ -862,6 +862,7 @@ func buildNodeQueries(
 			handledScopes = append(handledScopes, scope)
 
 			for _, hostname := range nodes {
+				resolvedSubCluster := subCluster
 
 				// If no subCluster given, get it by node
 				if subCluster == "" {
@@ -873,6 +874,10 @@ func buildNodeQueries(
 					if scterr != nil {
 						return nil, nil, scterr
 					}
+					resolvedSubCluster = subClusterName
+				}
+				if IsMetricRemovedForSubCluster(mc, resolvedSubCluster) {
+					continue
 				}
 
 				// Always full node hwthread id list, no partial queries expected
