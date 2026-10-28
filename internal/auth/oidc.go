@@ -185,7 +185,8 @@ func (oa *OIDC) OAuth2Callback(rw http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	token, err := oa.client.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier))
+	token, err := oa.client.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier),
+		oauth2.SetAuthURLParam("redirect_uri", oidcRedirectURL(r)))
 	if err != nil {
 		cclog.Errorf("token exchange failed: %s", err.Error())
 		http.Error(rw, "Authentication failed during token exchange", http.StatusInternalServerError)
@@ -347,16 +348,19 @@ func (oa *OIDC) OAuth2Login(rw http.ResponseWriter, r *http.Request) {
 	}
 	setCallbackCookie(rw, r, "nonce", nonce)
 
-	// Build redirect URL from the incoming request
+	// Redirect user to consent page to ask for permission
+	url := oa.client.AuthCodeURL(state, oauth2.AccessTypeOffline,
+		oauth2.S256ChallengeOption(codeVerifier),
+		oidc.Nonce(nonce),
+		oauth2.SetAuthURLParam("redirect_uri", oidcRedirectURL(r)))
+	http.Redirect(rw, r, url, http.StatusFound)
+}
+
+// oidcRedirectURL binds authorization and exchange to the request's origin.
+func oidcRedirectURL(r *http.Request) string {
 	scheme := "https"
 	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") != "https" {
 		scheme = "http"
 	}
-	oa.client.RedirectURL = fmt.Sprintf("%s://%s/oidc-callback", scheme, r.Host)
-
-	// Redirect user to consent page to ask for permission
-	url := oa.client.AuthCodeURL(state, oauth2.AccessTypeOffline,
-		oauth2.S256ChallengeOption(codeVerifier),
-		oidc.Nonce(nonce))
-	http.Redirect(rw, r, url, http.StatusFound)
+	return fmt.Sprintf("%s://%s/oidc-callback", scheme, r.Host)
 }

@@ -8,7 +8,6 @@ package auth
 import (
 	"slices"
 	"testing"
-
 )
 
 func TestOIDCCallbackIgnoresForeignClientRoles(t *testing.T) {
@@ -37,4 +36,3 @@ func TestOIDCCallbackIgnoresForeignClientRoles(t *testing.T) {
 		})
 	}
 }
-

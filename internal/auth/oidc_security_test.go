@@ -6,10 +6,10 @@
 package auth
 
 import (
-	"encoding/gob"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/gob"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/ClusterCockpit/cc-lib/v2/schema"
+	"github.com/alexedwards/scs/v2"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
-	"github.com/alexedwards/scs/v2"
 )
 
 // runSecurityOIDCCallback exercises the complete callback against a local provider.
@@ -29,7 +29,7 @@ func runSecurityOIDCCallback(t *testing.T, userInfoSubject string, dbRoles bool,
 	oldKeys := Keys
 	t.Cleanup(func() { Keys = oldKeys })
 	Keys = AuthConfig{OpenIDConfig: &OpenIDConfig{
-		RoleMapping: map[string]string{"admin":"admin", "support":"support", "manager":"manager"},
+		RoleMapping: map[string]string{"admin": "admin", "support": "support", "manager": "manager"},
 	}}
 	t.Setenv("OID_CLIENT_ID", "audit-client")
 	t.Setenv("OID_CLIENT_SECRET", "audit-synthetic-secret")
@@ -128,7 +128,7 @@ func securitySessionUser(t *testing.T, a *Authentication, response *httptest.Res
 	}
 	var user *schema.User
 	var err error
-	a.LoadSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { user, err = a.AuthViaSession(w,r) })).ServeHTTP(httptest.NewRecorder(),req)
+	a.LoadSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { user, err = a.AuthViaSession(w, r) })).ServeHTTP(httptest.NewRecorder(), req)
 	if err != nil || user == nil {
 		t.Fatalf("no valid session: %v", err)
 	}
@@ -167,6 +167,6 @@ func TestOIDCCallbackBindsUserInfoSubject(t *testing.T) {
 
 // Use the current session middleware and in-memory store; never a real user DB.
 func newSecurityAuthentication() *Authentication {
-    gob.Register([]string{})
-    return &Authentication{sessionManager: scs.New()}
+	gob.Register([]string{})
+	return &Authentication{sessionManager: scs.New()}
 }
