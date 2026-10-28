@@ -219,7 +219,6 @@ func fetchData(req APIQueryRequest, positions *[][]int) (*APIQueryResponse, erro
 		return nil, ErrEmptyCluster
 	}
 
-	req.WithData = true
 	ms := GetMemoryStore()
 	if ms == nil {
 		return nil, fmt.Errorf("[METRICSTORE]> memorystore not initialized")
@@ -239,7 +238,14 @@ func fetchData(req APIQueryRequest, positions *[][]int) (*APIQueryResponse, erro
 		for selectorIndex, sel := range sels {
 			data := APIMetricData{}
 
-			data.Data, data.From, data.To, data.Resolution, err = ms.Read(sel, query.Metric, req.From, req.To, query.Resolution, req.ResampleAlgo)
+			if !req.WithData && req.WithStats && query.Resolution == 0 {
+				data, err = ms.queryStatistics(sel, query.Metric, req.From, req.To, req.ResampleAlgo)
+			} else {
+				data.Data, data.From, data.To, data.Resolution, err = ms.Read(sel, query.Metric, req.From, req.To, query.Resolution, req.ResampleAlgo)
+				if err == nil && req.WithStats {
+					data.AddStats()
+				}
+			}
 			if err != nil {
 				// Skip Error If Just Missing Host or Metric, Continue
 				// Empty Return For Metric Handled Gracefully By Frontend
@@ -256,13 +262,10 @@ func fetchData(req APIQueryRequest, positions *[][]int) (*APIQueryResponse, erro
 				continue
 			}
 
-			if req.WithStats {
-				data.AddStats()
-			}
 			if query.ScaleFactor != 0 {
 				data.ScaleBy(query.ScaleFactor)
 			}
-			if req.WithPadding {
+			if req.WithPadding && req.WithData {
 				data.PadDataWithNull(ms, req.From, req.To, query.Metric)
 			}
 			if !req.WithData {

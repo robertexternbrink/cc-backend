@@ -78,7 +78,7 @@ func fetchBoth(t *testing.T, q APIQuery) (full, fast APIMetricData) {
 	t.Helper()
 	req := APIQueryRequest{
 		Cluster: "cl", From: fsFrom, To: fsFrom + fsCount*fsFreq,
-		Queries: []APIQuery{q}, WithStats: true,
+		Queries: []APIQuery{q}, WithStats: true, WithData: true,
 	}
 	fd, err := FetchData(req)
 	if err != nil {
