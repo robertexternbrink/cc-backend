@@ -269,7 +269,8 @@
       ) || 0;
       rawInfos['cpuPwr'] = Math.floor((rawCpuPwr * 100) / 100)
 
-      let rawCpuUnit = $statusQuery?.data?.nodeMetrics[0]?.metrics.find((m) => m.name == 'cpu_power')?.metric?.unit || null
+      let rawCpuUnit = $statusQuery?.data?.nodeMetrics?.map(node =>
+        node.metrics.find(m => m.name == 'cpu_power')?.metric?.unit).find(Boolean) || null
       if (!rawInfos['cpuPwrUnitBase'])   rawInfos['cpuPwrUnitBase'] = rawCpuUnit ? rawCpuUnit.base : ''
       if (!rawInfos['cpuPwrUnitPrefix']) rawInfos['cpuPwrUnitPrefix'] = rawCpuUnit ? rawCpuUnit.prefix : ''
 
@@ -279,7 +280,8 @@
       ) || 0;
       rawInfos['gpuPwr'] = Math.floor((rawGpuPwr * 100) / 100)
 
-      let rawGpuUnit = $statusQuery?.data?.nodeMetrics[0]?.metrics.find((m) => m.name == 'acc_power')?.metric?.unit || null
+      let rawGpuUnit = $statusQuery?.data?.nodeMetrics?.map(node =>
+        node.metrics.find(m => m.name == 'acc_power')?.metric?.unit).find(Boolean) || null
       if (!rawInfos['gpuPwrUnitBase']) rawInfos['gpuPwrUnitBase'] = rawGpuUnit ? rawGpuUnit.base : ''
       if (!rawInfos['gpuPwrUnitPrefix']) rawInfos['gpuPwrUnitPrefix'] = rawGpuUnit ? rawGpuUnit.prefix : ''
     }
