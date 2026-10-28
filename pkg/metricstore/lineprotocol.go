@@ -385,7 +385,7 @@ func DecodeLine(dec *lineprotocol.Decoder,
 			continue
 		}
 	}
-	return nil
+	return dec.Err()
 }
 
 // decodeTimestamp returns the timestamp of the current line in Unix seconds,
