@@ -46,7 +46,7 @@ func freeMetrics(rw http.ResponseWriter, r *http.Request) {
 
 	to, err := strconv.ParseInt(rawTo, 10, 64)
 	if err != nil {
-		handleError(err, http.StatusInternalServerError, rw)
+		handleError(err, http.StatusBadRequest, rw)
 		return
 	}
 
