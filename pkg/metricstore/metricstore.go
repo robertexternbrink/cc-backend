@@ -311,7 +311,11 @@ func Shutdown() {
 		<-natsDone
 	}
 
+	ms := GetMemoryStore()
 	if Keys.Checkpoints.FileFormat == "wal" {
+		// A periodic checkpoint may still be sending its FIFO rotation barrier.
+		// Wait for it before shutting down the shared WAL channels.
+		ms.checkpointMu.Lock()
 		// Signal producers to stop sending before closing channels,
 		// preventing send-on-closed-channel panics from in-flight NATS workers.
 		walShuttingDown.Store(true)
@@ -323,6 +327,7 @@ func Shutdown() {
 		}
 		drainStart := time.Now()
 		WaitForWALStagingDrain()
+		ms.checkpointMu.Unlock()
 		cclog.Infof("[METRICSTORE]> WAL staging goroutines exited (%v)", time.Since(drainStart))
 	}
 
@@ -330,8 +335,6 @@ func Shutdown() {
 	checkpointStart := time.Now()
 	var files int
 	var err error
-
-	ms := GetMemoryStore()
 
 	lastCheckpointMu.Lock()
 	from := lastCheckpoint

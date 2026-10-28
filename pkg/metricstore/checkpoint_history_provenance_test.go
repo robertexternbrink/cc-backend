@@ -161,3 +161,46 @@ func TestCheckpointFencesWritesAndWALRotationDrainsFIFO(t *testing.T) {
 	}
 	assertCheckpointValues(t, restored, start, want)
 }
+
+// Shutdown must not close the FIFO while an earlier snapshot can still enqueue
+// its rotation barrier. It must wait for that checkpoint to finish first.
+func TestShutdownWaitsForCheckpointBeforeClosingWAL(t *testing.T) {
+	checkpointTestConfig(t)
+	previousStore, previousChannels := msInstance, walShardChs
+	previousStopping := walShuttingDown.Load()
+	shutdownFuncMu.Lock()
+	previousShutdown := shutdownFunc
+	cancelled := make(chan struct{})
+	shutdownFunc = func() { close(cancelled) }
+	shutdownFuncMu.Unlock()
+	t.Cleanup(func() {
+		msInstance, walShardChs = previousStore, previousChannels
+		walShuttingDown.Store(previousStopping)
+		shutdownFuncMu.Lock()
+		shutdownFunc = previousShutdown
+		shutdownFuncMu.Unlock()
+	})
+	m := newHistoryTestStore()
+	msInstance = m
+	Keys.Checkpoints.RootDir = t.TempDir()
+	walShardChs = []chan *WALMessage{make(chan *WALMessage, 1)}
+	walShuttingDown.Store(false)
+	m.checkpointMu.Lock()
+	done := make(chan struct{})
+	go func() { Shutdown(); close(done) }()
+	<-cancelled
+	deadline := time.Now().Add(20 * time.Millisecond)
+	for time.Now().Before(deadline) && !walShuttingDown.Load() {
+		time.Sleep(time.Millisecond)
+	}
+	closedTooSoon := walShuttingDown.Load()
+	m.checkpointMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown did not finish after the checkpoint released its fence")
+	}
+	if closedTooSoon {
+		t.Fatal("WAL shutdown crossed an active checkpoint/rotation fence")
+	}
+}
