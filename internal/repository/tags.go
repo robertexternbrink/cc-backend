@@ -131,6 +131,14 @@ func (r *JobRepository) RemoveTag(user *schema.User, job, tag int64) ([]*schema.
 // RemoveJobTagByRequest removes a tag from the job with the database id `job` by tag type, name, and scope.
 // Requires user authentication for security checks. Used by REST API.
 func (r *JobRepository) RemoveJobTagByRequest(user *schema.User, job int64, tagType string, tagName string, tagScope string) ([]*schema.Tag, error) {
+	writable, err := r.checkScopeAuth(user, "write", tagScope)
+	if err != nil {
+		return nil, err
+	}
+	if !writable {
+		return nil, fmt.Errorf("cannot write tag scope with current authorization")
+	}
+
 	// Get Tag ID to delete
 	tagID, exists := r.TagID(tagType, tagName, tagScope)
 	if !exists {
