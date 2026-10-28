@@ -363,7 +363,8 @@ func (t *JobClassTagger) Match(job *schema.Job) {
 		skipRule := false
 		for _, m := range ri.metrics {
 			stats, ok := jobStats.Metrics[m]
-			if !ok {
+			metric := metricsList[m]
+			if !ok || metric == nil {
 				cclog.Debugf("job classification: missing metric '%s' for rule %s on job %d", m, tag, job.JobID)
 				skipRule = true
 				break
@@ -373,10 +374,10 @@ func (t *JobClassTagger) Match(job *schema.Job) {
 				"max": stats.Max,
 				"avg": stats.Avg,
 				"limits": map[string]float64{
-					"peak":    metricsList[m].Peak,
-					"normal":  metricsList[m].Normal,
-					"caution": metricsList[m].Caution,
-					"alert":   metricsList[m].Alert,
+					"peak":    metric.Peak,
+					"normal":  metric.Normal,
+					"caution": metric.Caution,
+					"alert":   metric.Alert,
 				},
 			}
 		}
