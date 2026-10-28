@@ -3,6 +3,7 @@
   "version": "1.5.3",
   "license": "MIT",
   "scripts": {
+    "test": "node --test --test-concurrency=1 --test-timeout=60000 test/*.test.mjs",
     "build": "rollup -c",
     "dev": "rollup -c -w"
   },
