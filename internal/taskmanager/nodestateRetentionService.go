@@ -6,6 +6,7 @@
 package taskmanager
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -105,28 +106,29 @@ func RegisterNodeStateRetentionMoveService(cfgPtr *config.NodeStateRetention) {
 				cutoff := time.Now().Unix() - int64(ageHours*3600)
 				nodeRepo := repository.GetNodeRepository()
 
-				rows, err := nodeRepo.FindNodeStatesBefore(cutoff)
-				if err != nil {
-					cclog.Errorf("NodeState move retention: error finding rows: %v", err)
-					return
-				}
-				if len(rows) == 0 {
-					return
-				}
-
-				cclog.Infof("NodeState move retention: archiving %d rows", len(rows))
-				if err := transferNodeStatesParquet(rows, target, maxFileSizeMB); err != nil {
-					cclog.Errorf("NodeState move retention: transfer: %v", err)
-					return
-				}
-
-				cnt, err := nodeRepo.DeleteNodeStatesBefore(cutoff)
-				if err != nil {
-					cclog.Errorf("NodeState move retention: error deleting rows: %v", err)
-				} else {
-					cclog.Infof("NodeState move retention: deleted %d rows from db", cnt)
+				if err := archiveNodeStatesBefore(nodeRepo, cutoff, target, maxFileSizeMB); err != nil {
+					cclog.Errorf("NodeState move retention: %v", err)
 				}
 			}))
+}
+
+// archiveNodeStatesBefore completes the export before removing source rows.
+func archiveNodeStatesBefore(repo *repository.NodeRepository, cutoff int64, target pqarchive.ParquetTarget, maxSizeMB int) error {
+	rows, err := repo.FindNodeStatesBefore(cutoff)
+	if err != nil {
+		return fmt.Errorf("finding rows: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	cclog.Infof("NodeState move retention: archiving %d rows", len(rows))
+	if err := transferNodeStatesParquet(rows, target, maxSizeMB); err != nil {
+		return err
+	}
+	if err := repo.DeleteNodeStatesByIDs(context.Background(), rows); err != nil {
+		return fmt.Errorf("deleting archived rows: %w", err)
+	}
+	return nil
 }
 
 // transferNodeStatesParquet completes the export before source rows may be deleted.
