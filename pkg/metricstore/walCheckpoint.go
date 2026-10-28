@@ -315,11 +315,21 @@ func WALStaging(wg *sync.WaitGroup, ctx context.Context) {
 			for {
 				select {
 				case <-ctx.Done():
-					// On shutdown, skip draining buffered messages — a full binary
-					// checkpoint will be written from in-memory state, making
-					// buffered WAL records redundant.
-					flushDirty()
-					return
+					// Preserve accepted records even if the final snapshot fails.
+					// Rotation barriers share this FIFO and must also complete.
+					for {
+						select {
+						case msg, ok := <-msgCh:
+							if !ok {
+								flushDirty()
+								return
+							}
+							processMsg(msg)
+						default:
+							flushDirty()
+							return
+						}
+					}
 				case msg, ok := <-msgCh:
 					if !ok {
 						return
