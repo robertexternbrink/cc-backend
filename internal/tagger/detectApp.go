@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/ClusterCockpit/cc-backend/internal/repository"
 	cclog "github.com/ClusterCockpit/cc-lib/v2/ccLogger"
@@ -46,6 +47,8 @@ type appInfo struct {
 // configuration when files change. When a job script matches a pattern,
 // the corresponding application tag is automatically applied.
 type AppTagger struct {
+	// configMu protects publication of immutable pattern slices.
+	configMu sync.RWMutex
 	// apps holds application patterns in deterministic order
 	apps []appInfo
 	// tagType is the type of tag ("app")
@@ -54,7 +57,7 @@ type AppTagger struct {
 	cfgPath string
 }
 
-func (t *AppTagger) scanApp(f *os.File, fns string) {
+func (t *AppTagger) scanApp(f *os.File, fns string) error {
 	scanner := bufio.NewScanner(f)
 	tag := strings.TrimSuffix(fns, filepath.Ext(fns))
 	ai := appInfo{tag: tag, patterns: make([]*regexp.Regexp, 0)}
@@ -68,22 +71,29 @@ func (t *AppTagger) scanApp(f *os.File, fns string) {
 		wrapped := `(?m)^[^#]*` + line
 		re, err := regexp.Compile(wrapped)
 		if err != nil {
-			cclog.Errorf("invalid regex pattern '%s' (wrapped: '%s') in %s: %v", line, wrapped, fns, err)
-			continue
+			return fmt.Errorf("invalid pattern in %s: %w", fns, err)
 		}
 		ai.patterns = append(ai.patterns, re)
 	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read patterns in %s: %w", fns, err)
+	}
+
+	t.configMu.Lock()
+	defer t.configMu.Unlock()
+	apps := append([]appInfo(nil), t.apps...)
 
 	// Remove existing entry for this tag if present
-	for i, a := range t.apps {
+	for i, a := range apps {
 		if a.tag == tag {
-			t.apps = append(t.apps[:i], t.apps[i+1:]...)
+			apps = append(apps[:i], apps[i+1:]...)
 			break
 		}
 	}
 
 	cclog.Infof("AppTagger loaded %d patterns for %s", len(ai.patterns), tag)
-	t.apps = append(t.apps, ai)
+	t.apps = append(apps, ai)
+	return nil
 }
 
 // EventMatch checks if a filesystem event should trigger configuration reload.
@@ -95,12 +105,23 @@ func (t *AppTagger) EventMatch(s string) bool {
 // EventCallback is triggered when the configuration directory changes.
 // It reloads all application pattern files from the watched directory.
 func (t *AppTagger) EventCallback() {
+	apps, err := t.loadApps()
+	if err != nil {
+		cclog.Errorf("AppTagger reload rejected; keeping previous patterns: %v", err)
+		return
+	}
+	t.configMu.Lock()
+	t.apps = apps
+	t.configMu.Unlock()
+}
+
+func (t *AppTagger) loadApps() ([]appInfo, error) {
 	files, err := os.ReadDir(t.cfgPath)
 	if err != nil {
-		cclog.Fatal(err)
+		return nil, err
 	}
 
-	t.apps = make([]appInfo, 0)
+	loaded := &AppTagger{apps: make([]appInfo, 0)}
 
 	for _, fn := range files {
 		if fn.IsDir() {
@@ -110,14 +131,18 @@ func (t *AppTagger) EventCallback() {
 		cclog.Debugf("Process: %s", fns)
 		f, err := os.Open(filepath.Join(t.cfgPath, fns))
 		if err != nil {
-			cclog.Errorf("error opening app file %s: %#v", fns, err)
-			continue
+			return nil, fmt.Errorf("open app file %s: %w", fns, err)
 		}
-		t.scanApp(f, fns)
-		if err := f.Close(); err != nil {
-			cclog.Errorf("error closing app file %s: %#v", fns, err)
+		scanErr := loaded.scanApp(f, fns)
+		closeErr := f.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
 		}
 	}
+	return loaded.apps, nil
 }
 
 // Register initializes the AppTagger by loading application patterns from external folder.
@@ -129,33 +154,18 @@ func (t *AppTagger) Register() error {
 		t.cfgPath = defaultConfigPath
 	}
 	t.tagType = tagTypeApp
-	t.apps = make([]appInfo, 0)
 
 	if !util.CheckFileExists(t.cfgPath) {
 		return fmt.Errorf("configuration path does not exist: %s", t.cfgPath)
 	}
 
-	files, err := os.ReadDir(t.cfgPath)
+	apps, err := t.loadApps()
 	if err != nil {
-		return fmt.Errorf("error reading app folder: %#v", err)
+		return err
 	}
-
-	for _, fn := range files {
-		if fn.IsDir() {
-			continue
-		}
-		fns := fn.Name()
-		cclog.Debugf("Process: %s", fns)
-		f, err := os.Open(filepath.Join(t.cfgPath, fns))
-		if err != nil {
-			cclog.Errorf("error opening app file %s: %#v", fns, err)
-			continue
-		}
-		t.scanApp(f, fns)
-		if err := f.Close(); err != nil {
-			cclog.Errorf("error closing app file %s: %#v", fns, err)
-		}
-	}
+	t.configMu.Lock()
+	t.apps = apps
+	t.configMu.Unlock()
 
 	cclog.Infof("Setup file watch for %s", t.cfgPath)
 	util.AddListener(t.cfgPath, t)
@@ -170,8 +180,11 @@ func (t *AppTagger) Register() error {
 // Multiple application tags can be applied if patterns for different apps match.
 func (t *AppTagger) Match(job *schema.Job) {
 	r := repository.GetJobRepository()
+	t.configMu.RLock()
+	apps := t.apps
+	t.configMu.RUnlock()
 
-	if len(t.apps) == 0 {
+	if len(apps) == 0 {
 		cclog.Warn("AppTagger: no app patterns loaded, skipping match")
 		return
 	}
@@ -201,10 +214,10 @@ func (t *AppTagger) Match(job *schema.Job) {
 
 	id := *job.ID
 	jobscriptLower := strings.ToLower(jobscript)
-	cclog.Debugf("AppTagger: matching job %d (script length: %d) against %d apps", id, len(jobscriptLower), len(t.apps))
+	cclog.Debugf("AppTagger: matching job %d (script length: %d) against %d apps", id, len(jobscriptLower), len(apps))
 
 	matched := false
-	for _, a := range t.apps {
+	for _, a := range apps {
 		for _, re := range a.patterns {
 			if re.MatchString(jobscriptLower) {
 				if r.HasTag(id, t.tagType, a.tag) {
