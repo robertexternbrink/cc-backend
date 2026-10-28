@@ -284,7 +284,7 @@ func GetSubClusterByNode(cluster, hostname string) (string, error) {
 		return "", fmt.Errorf("ARCHIVE/CLUSTERCONFIG > unkown cluster: %v", cluster)
 	}
 
-	if c.SubClusters[0].Nodes == "" {
+	if len(c.SubClusters) > 0 && c.SubClusters[0].Nodes == "*" {
 		return c.SubClusters[0].Name, nil
 	}
 
