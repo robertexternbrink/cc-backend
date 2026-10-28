@@ -407,6 +407,10 @@ func (r *queryResolver) AllocatedNodes(ctx context.Context, cluster string) ([]*
 
 // Node is the resolver for the node field.
 func (r *queryResolver) Node(ctx context.Context, id string) (*schema.Node, error) {
+	if err := repository.CheckNodeAccess(ctx); err != nil {
+		return nil, err
+	}
+
 	repo := repository.GetNodeRepository()
 	numericID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {

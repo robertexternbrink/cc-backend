@@ -865,6 +865,12 @@ func (r *NodeRepository) GetNodesForList(
 	return nodes, nodeStateMap, metricHealthMap, countNodes, hasNextPage, nil
 }
 
+// CheckNodeAccess applies the existing node-query role rule without a database lookup.
+func CheckNodeAccess(ctx context.Context) error {
+	_, err := AccessCheck(ctx, sq.SelectBuilder{})
+	return err
+}
+
 func AccessCheck(ctx context.Context, query sq.SelectBuilder) (sq.SelectBuilder, error) {
 	user := GetUserFromContext(ctx)
 	return AccessCheckWithUser(user, query)
