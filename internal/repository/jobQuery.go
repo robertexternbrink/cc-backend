@@ -547,6 +547,9 @@ func buildMetaJSONCondition(jsonField string, cond *model.StringInput, query sq.
 	if cond.Contains != nil {
 		return query.Where("JSON_EXTRACT(meta_data, \"$."+jsonField+"\") LIKE ?", fmt.Sprint("%", *cond.Contains, "%"))
 	}
+	if cond.In != nil {
+		return query.Where(sq.Eq{"JSON_EXTRACT(meta_data, \"$." + jsonField + "\")": slices.Clone(cond.In)})
+	}
 	return query
 }
 
@@ -568,6 +571,10 @@ func buildResourceJSONCondition(jsonField string, cond *model.StringInput, query
 	}
 	if cond.Contains != nil {
 		return query.Where("EXISTS (SELECT 1 FROM json_each(job.resources) WHERE json_extract(value, \"$."+jsonField+"\") LIKE ?)", fmt.Sprint("%", *cond.Contains, "%"))
+	}
+	if cond.In != nil {
+		matching := sq.Select("1").From("json_each(job.resources)").Where(sq.Eq{"json_extract(value, \"$." + jsonField + "\")": slices.Clone(cond.In)})
+		return query.Where(sq.Expr("EXISTS (?)", matching))
 	}
 	return query
 }
