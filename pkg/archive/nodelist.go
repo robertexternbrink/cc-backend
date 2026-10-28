@@ -138,20 +138,25 @@ func (nl *NodeList) Contains(name string) bool {
 func (nl *NodeList) PrintList() []string {
 	var out []string
 	for _, term := range *nl {
-		prefix := term[0].prefix()
-		if len(term) == 1 {
-			out = append(out, prefix)
-		} else {
-			limitArr := term[1].limits()
-			for _, inner := range limitArr {
-				for i := inner["start"]; i < inner["end"]+1; i++ {
-					if inner["zeroPadded"] == 1 {
-						out = append(out, fmt.Sprintf("%s%0*d", prefix, inner["digits"], i))
-					} else {
-						cclog.Error("node list: only zero-padded ranges are allowed")
+		var expand func(int, string)
+		expand = func(index int, prefix string) {
+			if index == len(term) {
+				out = append(out, prefix)
+				return
+			}
+			switch expression := term[index].(type) {
+			case NLExprString:
+				expand(index+1, prefix+string(expression))
+			case NLExprIntRanges:
+				for _, interval := range expression {
+					for value := interval.start; value <= interval.end; value++ {
+						expand(index+1, fmt.Sprintf("%s%0*d", prefix, interval.digits, value))
 					}
 				}
 			}
+		}
+		if len(term) > 0 {
+			expand(0, "")
 		}
 	}
 	return out
@@ -170,14 +175,20 @@ func (nl *NodeList) PrintList() []string {
 func (nl *NodeList) NodeCount() int {
 	out := 0
 	for _, term := range *nl {
-		if len(term) == 1 {
-			out += 1
-		} else {
-			limitArr := term[1].limits()
-			for _, inner := range limitArr {
-				out += (inner["end"] - inner["start"]) + 1
+		if len(term) == 0 {
+			continue
+		}
+		count := 1
+		for _, expression := range term {
+			if intervals, ok := expression.(NLExprIntRanges); ok {
+				size := 0
+				for _, interval := range intervals {
+					size += int(interval.end-interval.start) + 1
+				}
+				count *= size
 			}
 		}
+		out += count
 	}
 	return out
 }
@@ -340,6 +351,9 @@ func ParseNodeList(raw string) (NodeList, error) {
 
 	nl := NodeList{}
 	for _, rawterm := range rawterms {
+		if rawterm == "" {
+			return nil, fmt.Errorf("ARCHIVE/NODELIST > empty node term")
+		}
 		exprs := []interface {
 			consume(input string) (next string, ok bool)
 			limits() []map[string]int
@@ -386,6 +400,10 @@ func ParseNodeList(raw string) (NodeList, error) {
 					x2, err := strconv.ParseInt(s2, 10, 32)
 					if err != nil {
 						return nil, fmt.Errorf("ARCHIVE/NODELIST > could not parse int: %w", err)
+					}
+
+					if x2 < x1 {
+						return nil, fmt.Errorf("ARCHIVE/NODELIST > descending range %s", part)
 					}
 
 					nles = append(nles, NLExprIntRange{

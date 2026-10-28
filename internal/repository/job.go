@@ -695,6 +695,9 @@ func (r *JobRepository) AllocatedNodes(cluster string) (map[string]map[string]in
 			hosts[resource.Hostname] += 1
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate allocated nodes for cluster %s: %w", cluster, err)
+	}
 
 	cclog.Debugf("Timer AllocatedNodes %s", time.Since(start))
 	return subclusters, nil

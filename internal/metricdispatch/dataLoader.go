@@ -371,7 +371,9 @@ func LoadNodeData(
 	ctx context.Context,
 ) (map[string]map[string][]*schema.JobMetric, error) {
 	if metrics == nil {
-		for _, m := range archive.GetCluster(cluster).MetricConfig {
+		clusterConfig := archive.GetCluster(cluster)
+		if clusterConfig == nil { return nil, fmt.Errorf("unknown cluster %q", cluster) }
+		for _, m := range clusterConfig.MetricConfig {
 			metrics = append(metrics, m.Name)
 		}
 	}
@@ -416,7 +418,9 @@ func LoadNodeListData(
 	resampleAlgo string,
 ) (map[string]schema.JobData, error) {
 	if metrics == nil {
-		for _, m := range archive.GetCluster(cluster).MetricConfig {
+		clusterConfig := archive.GetCluster(cluster)
+		if clusterConfig == nil { return nil, fmt.Errorf("unknown cluster %q", cluster) }
+		for _, m := range clusterConfig.MetricConfig {
 			metrics = append(metrics, m.Name)
 		}
 	}
