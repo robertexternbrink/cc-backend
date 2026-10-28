@@ -42,6 +42,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/ClusterCockpit/cc-backend/internal/footprint"
 	"github.com/ClusterCockpit/cc-backend/pkg/archive"
@@ -536,19 +537,28 @@ func copyStatisticsSeries(src *schema.StatsSeries) *schema.StatsSeries {
 	return dst
 }
 
-// plotCacheSize includes referenced series text as well as sample storage.
-// Charge shared strings per cache entry, conservatively overestimating reuse.
+// plotCacheSize conservatively charges backing capacities, object metadata and
+// referenced strings. Shared storage is charged per entry rather than undercounted.
 func plotCacheSize(data schema.JobData) int {
-	size := data.Size()
-	for _, scopes := range data.Metrics {
+	size := 1024
+	sampleBytes := int(unsafe.Sizeof(schema.Float(0)))
+	for name, scopes := range data.Metrics {
+		size += len(name) + 128
 		for _, metric := range scopes {
 			if metric == nil {
 				continue
 			}
+			size += int(unsafe.Sizeof(*metric)) + 128 + cap(metric.Series)*int(unsafe.Sizeof(schema.Series{}))
 			for _, series := range metric.Series {
-				size += len(series.Hostname)
+				size += cap(series.Data)*sampleBytes + len(series.Hostname)
 				if series.ID != nil {
-					size += len(*series.ID)
+					size += len(*series.ID) + int(unsafe.Sizeof(*series.ID))
+				}
+			}
+			if stats := metric.StatisticsSeries; stats != nil {
+				size += int(unsafe.Sizeof(*stats)) + sampleBytes*(cap(stats.Min)+cap(stats.Mean)+cap(stats.Median)+cap(stats.Max))
+				for _, values := range stats.Percentiles {
+					size += 64 + cap(values)*sampleBytes
 				}
 			}
 		}
