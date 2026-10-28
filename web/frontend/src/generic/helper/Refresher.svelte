@@ -8,6 +8,7 @@
 -->
 
 <script>
+  import { onDestroy } from "svelte";
   import { Button, Icon, Input, InputGroup } from "@sveltestrap/sveltestrap";
 
   /* Svelte 5 Props */
@@ -30,6 +31,10 @@
     if (refreshInterval == null) return;
     refreshIntervalId = setInterval(() => onRefresh(refreshInterval), refreshInterval);
   }
+
+  onDestroy(() => {
+    if (refreshIntervalId != null) clearInterval(refreshIntervalId);
+  });
 
   /* Svelte 5 onMount */
   $effect(() => {
