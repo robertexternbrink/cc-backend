@@ -127,7 +127,7 @@ func LoadData(job *schema.Job,
 					return err, 0, 0
 				}
 			}
-			size = jd.Size()
+			size = plotCacheSize(jd)
 		} else {
 			var jdTemp schema.JobData
 			jdTemp, err = archive.GetHandle().LoadJobData(job)
@@ -190,7 +190,7 @@ func LoadData(job *schema.Job,
 				}
 				jd = res
 			}
-			size = jd.Size()
+			size = plotCacheSize(jd)
 		}
 
 		ttl = 5 * time.Hour
@@ -538,4 +538,24 @@ func copyStatisticsSeries(src *schema.StatsSeries) *schema.StatsSeries {
 	}
 
 	return dst
+}
+
+// plotCacheSize includes referenced series text as well as sample storage.
+// Charge shared strings per cache entry, conservatively overestimating reuse.
+func plotCacheSize(data schema.JobData) int {
+	size := data.Size()
+	for _, scopes := range data.Metrics {
+		for _, metric := range scopes {
+			if metric == nil {
+				continue
+			}
+			for _, series := range metric.Series {
+				size += len(series.Hostname)
+				if series.ID != nil {
+					size += len(*series.ID)
+				}
+			}
+		}
+	}
+	return size
 }
