@@ -55,41 +55,37 @@ func assertCheckpointValues(t *testing.T, m *MemoryStore, start int64, want []sc
 // replay may fill a gap or overwrite a buffer older than the latest snapshot.
 func TestWALRecoveryOlderLinksAndGaps(t *testing.T) {
 	const start = int64(1700000000)
-	{
-		{
-			m := newHistoryTestStore()
-			level := m.GetLevel([]string{"cluster", "host"})
-			for _, metric := range []*CheckpointMetrics{
-				{Frequency: 10, Start: start, Data: []schema.Float{10, 11, 12}},
-				{Frequency: 10, Start: start + 50, Data: []schema.Float{15, 16}},
-			} {
-				if err := level.loadFile(&CheckpointFile{Metrics: map[string]*CheckpointMetrics{"metric": metric}}, m); err != nil {
-					t.Fatal(err)
-				}
-			}
-			var wal bytes.Buffer
-			binary.Write(&wal, binary.LittleEndian, walFileMagic)
-			w := bufio.NewWriter(&wal)
-			for _, sample := range []struct{ index, value int }{{1, 77}, {3, 13}, {4, 14}, {6, 66}} {
-				if _, err := writeWALRecordDirect(w, &WALMessage{MetricName: "metric", Timestamp: start + int64(sample.index)*10, Value: schema.Float(sample.value)}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			w.Flush()
-			filename := filepath.Join(t.TempDir(), "current.wal")
-			if err := os.WriteFile(filename, wal.Bytes(), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			f, err := os.Open(filename)
-			if err != nil {
-				t.Fatal(err)
-			}
-			err = level.loadWALFile(m, f, 0)
-			f.Close()
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertCheckpointValues(t, m, start, []schema.Float{10, 77, 12, 13, 14, 15, 66})
+	m := newHistoryTestStore()
+	level := m.GetLevel([]string{"cluster", "host"})
+	for _, metric := range []*CheckpointMetrics{
+		{Frequency: 10, Start: start, Data: []schema.Float{10, 11, 12}},
+		{Frequency: 10, Start: start + 50, Data: []schema.Float{15, 16}},
+	} {
+		if err := level.loadFile(&CheckpointFile{Metrics: map[string]*CheckpointMetrics{"metric": metric}}, m); err != nil {
+			t.Fatal(err)
 		}
 	}
+	var wal bytes.Buffer
+	binary.Write(&wal, binary.LittleEndian, walFileMagic)
+	w := bufio.NewWriter(&wal)
+	for _, sample := range []struct{ index, value int }{{1, 77}, {3, 13}, {4, 14}, {6, 66}} {
+		if _, err := writeWALRecordDirect(w, &WALMessage{MetricName: "metric", Timestamp: start + int64(sample.index)*10, Value: schema.Float(sample.value)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.Flush()
+	filename := filepath.Join(t.TempDir(), "current.wal")
+	if err := os.WriteFile(filename, wal.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = level.loadWALFile(m, f, 0)
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCheckpointValues(t, m, start, []schema.Float{10, 77, 12, 13, 14, 15, 66})
 }

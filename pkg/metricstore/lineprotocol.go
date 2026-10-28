@@ -361,6 +361,12 @@ func DecodeLine(dec *lineprotocol.Decoder,
 			return fmt.Errorf("host %s: %w", host, err)
 		}
 
+		ms.checkpointMu.RLock()
+		if err := ms.writeToLevel(lvl, st.selector, time, []Metric{metric}); err != nil {
+			ms.checkpointMu.RUnlock()
+			cclog.Warnf("write error for host %s metric %s at ts %d: %s", host, string(st.metricBuf), time, err.Error())
+			continue
+		}
 		if Keys.Checkpoints.FileFormat == "wal" {
 			msg := &WALMessage{
 				MetricName: string(st.metricBuf),
@@ -379,10 +385,7 @@ func DecodeLine(dec *lineprotocol.Decoder,
 			}
 		}
 
-		if err := ms.WriteToLevel(lvl, st.selector, time, []Metric{metric}); err != nil {
-			cclog.Warnf("write error for host %s metric %s at ts %d: %s", host, string(st.metricBuf), time, err.Error())
-			continue
-		}
+		ms.checkpointMu.RUnlock()
 	}
 	return nil
 }

@@ -33,9 +33,20 @@ func TestRestoredCheckpointIncludesAcceptedOverwrite(t *testing.T) {
 	if changed == nil || changed.Metrics["fs_read_bw"] == nil {
 		t.Fatal("accepted overwrite disappeared from the next checkpoint")
 	}
-	data := changed.Metrics["fs_read_bw"].Data
-	if len(data) != 2 || data[0] != 1 || data[1] != 42 {
-		t.Fatalf("checkpoint data = %v, want [1 42]", data)
+	// A checkpoint may contain only the dirty suffix. Replaying it over the
+	// retained snapshot must preserve both the unchanged and replaced value.
+	restored := newDeviceTestStore()
+	previous := &CheckpointFile{Metrics: map[string]*CheckpointMetrics{
+		"fs_read_bw": {Frequency: 60, Start: 120, Data: []schema.Float{1, 2}},
+	}}
+	for _, snapshot := range []*CheckpointFile{previous, changed} {
+		if err := restored.root.loadFile(snapshot, restored); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, _, _, _, err := restored.Read(nil, "fs_read_bw", 120, 240, 0, "")
+	if err != nil || len(data) != 2 || data[0] != 1 || data[1] != 42 {
+		t.Fatalf("restored checkpoint data = %v, error = %v, want [1 42]", data, err)
 	}
 }
 

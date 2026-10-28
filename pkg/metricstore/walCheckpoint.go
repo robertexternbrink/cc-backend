@@ -24,12 +24,12 @@
 //	        checkpoints/cluster/host/current.wal  (append-only, binary)
 //
 //	Periodic checkpoint (Checkpointing goroutine):
-//	  1. Write <timestamp>.bin snapshot (column-oriented, from main tree)
-//	  2. Signal WALStaging to truncate current.wal per host
+//	  1. Fence writes and snapshot all dirty ranges, including accepted backfills
+//	  2. Commit snapshots and rotate covered WAL records through a FIFO barrier
 //
 //	On restart (FromCheckpoint):
-//	  1. Load most recent <timestamp>.bin snapshot
-//	  2. Replay current.wal (overwrite-safe: buffer.write handles duplicate timestamps)
+//	  1. Overlay retained snapshots in timestamp order
+//	  2. Replay current.wal, including older overwrites and gap fills
 //
 // # WAL Record Format
 //
@@ -86,9 +86,6 @@ const (
 // Initialized by WALStaging; nil when WAL is not active.
 var walShardChs []chan *WALMessage
 
-// walShardRotateChs holds per-shard channels for WAL rotation requests.
-var walShardRotateChs []chan walRotateReq
-
 // walNumShards stores the number of shards (set during WALStaging init).
 var walNumShards int
 
@@ -99,11 +96,6 @@ var walStagingWg sync.WaitGroup
 // SendWALMessage from sending on a closed channel (which panics in Go).
 var walShuttingDown atomic.Bool
 
-// walCheckpointActive is set during binary checkpoint writes.
-// While active, SendWALMessage skips sending (returns true) because the
-// snapshot captures all in-memory data, making WAL writes redundant.
-var walCheckpointActive atomic.Bool
-
 // WALMessage represents a single metric write to be appended to the WAL.
 // Cluster and Node are NOT stored in the WAL record (inferred from file path).
 type WALMessage struct {
@@ -113,6 +105,8 @@ type WALMessage struct {
 	Selector   []string
 	Value      schema.Float
 	Timestamp  int64
+	// rotate is an internal FIFO barrier and is never serialized.
+	rotate *walRotateReq
 }
 
 // walRotateReq requests WAL file rotation for a specific host directory.
@@ -151,9 +145,6 @@ func SendWALMessage(msg *WALMessage) bool {
 	if walShardChs == nil || walShuttingDown.Load() {
 		return false
 	}
-	if walCheckpointActive.Load() {
-		return true // Data safe in memory; snapshot will capture it
-	}
 	shard := walShardIndex(msg.Cluster, msg.Node)
 	select {
 	case walShardChs[shard] <- msg:
@@ -176,16 +167,13 @@ func WALStaging(wg *sync.WaitGroup, ctx context.Context) {
 	chBufSize := max(65536/walNumShards, 1024)
 
 	walShardChs = make([]chan *WALMessage, walNumShards)
-	walShardRotateChs = make([]chan walRotateReq, walNumShards)
 
 	for i := range walNumShards {
 		walShardChs[i] = make(chan *WALMessage, chBufSize)
-		walShardRotateChs[i] = make(chan walRotateReq, 64)
 	}
 
 	for i := range walNumShards {
 		msgCh := walShardChs[i]
-		rotateCh := walShardRotateChs[i]
 
 		walStagingWg.Add(1)
 		wg.Go(func() {
@@ -243,7 +231,25 @@ func WALStaging(wg *sync.WaitGroup, ctx context.Context) {
 				return ws
 			}
 
+			processRotate := func(req walRotateReq) {
+				ws, ok := hostFiles[req.hostDir]
+				if ok && ws.f != nil {
+					ws.w.Flush()
+					ws.f.Close()
+					walPath := path.Join(req.hostDir, "current.wal")
+					if err := os.Remove(walPath); err != nil && !os.IsNotExist(err) {
+						cclog.Errorf("[METRICSTORE]> WAL: remove %s: %v", walPath, err)
+					}
+					delete(hostFiles, req.hostDir)
+				}
+				close(req.done)
+			}
+
 			processMsg := func(msg *WALMessage) {
+				if msg.rotate != nil {
+					processRotate(*msg.rotate)
+					return
+				}
 				hostDir := path.Join(Keys.Checkpoints.RootDir, msg.Cluster, msg.Node)
 				ws := getOrOpenWAL(hostDir)
 				if ws == nil {
@@ -276,20 +282,6 @@ func WALStaging(wg *sync.WaitGroup, ctx context.Context) {
 				ws.dirty = true
 			}
 
-			processRotate := func(req walRotateReq) {
-				ws, ok := hostFiles[req.hostDir]
-				if ok && ws.f != nil {
-					ws.w.Flush()
-					ws.f.Close()
-					walPath := path.Join(req.hostDir, "current.wal")
-					if err := os.Remove(walPath); err != nil && !os.IsNotExist(err) {
-						cclog.Errorf("[METRICSTORE]> WAL: remove %s: %v", walPath, err)
-					}
-					delete(hostFiles, req.hostDir)
-				}
-				close(req.done)
-			}
-
 			flushDirty := func() {
 				for _, ws := range hostFiles {
 					if ws.dirty {
@@ -313,8 +305,6 @@ func WALStaging(wg *sync.WaitGroup, ctx context.Context) {
 							return false
 						}
 						processMsg(msg)
-					case req := <-rotateCh:
-						processRotate(req)
 					default:
 						return true
 					}
@@ -341,8 +331,6 @@ func WALStaging(wg *sync.WaitGroup, ctx context.Context) {
 					// No flush here — timer handles periodic flushing.
 				case <-ticker.C:
 					flushDirty()
-				case req := <-rotateCh:
-					processRotate(req)
 				}
 			}
 		})
@@ -363,7 +351,7 @@ func WaitForWALStagingDrain() {
 // If shutdown is in progress (WAL staging goroutines may have exited),
 // rotation is skipped to avoid deadlocking on abandoned channels.
 func RotateWALFiles(hostDirs []string) {
-	if walShardRotateChs == nil || walShuttingDown.Load() {
+	if walShardChs == nil || walShuttingDown.Load() {
 		return
 	}
 	deadline := time.After(2 * time.Minute)
@@ -372,7 +360,7 @@ func RotateWALFiles(hostDirs []string) {
 		done := make(chan struct{})
 		shard := walShardIndexFromDir(dir)
 		select {
-		case walShardRotateChs[shard] <- walRotateReq{hostDir: dir, done: done}:
+		case walShardChs[shard] <- &WALMessage{rotate: &walRotateReq{hostDir: dir, done: done}}:
 			dones = append(dones, done)
 		case <-deadline:
 			cclog.Warnf("[METRICSTORE]> WAL rotation send timed out, %d of %d hosts remaining",
@@ -693,6 +681,13 @@ func joinSelector(sel []string) string {
 // Returns the number of files written, the list of host directories that were
 // successfully checkpointed (for WAL rotation), and any errors.
 func (m *MemoryStore) ToCheckpointWAL(dir string, from, to int64) (int, []string, error) {
+	return m.checkpointWAL(dir, from, to, nil)
+}
+
+// checkpointWAL fences writes through snapshot commit and optional FIFO rotation.
+func (m *MemoryStore) checkpointWAL(dir string, from, to int64, rotate func([]string)) (int, []string, error) {
+	m.checkpointMu.Lock()
+	defer m.checkpointMu.Unlock()
 	// Collect all cluster/host pairs.
 	m.root.lock.RLock()
 	totalHosts := 0
@@ -785,6 +780,10 @@ func (m *MemoryStore) ToCheckpointWAL(dir string, from, to int64) (int, []string
 	wg.Wait()
 	close(stopProgress)
 
+	if rotate != nil {
+		rotate(successDirs)
+	}
+
 	if errs > 0 {
 		return int(n), successDirs, fmt.Errorf("[METRICSTORE]> %d errors during binary checkpoint (%d successes)", errs, n)
 	}
@@ -826,9 +825,14 @@ func (l *Level) toCheckpointBinary(dir string, from, to int64, m *MemoryStore) e
 		os.Remove(tmpPath)
 		return err
 	}
-	f.Close()
-
-	return os.Rename(tmpPath, finalPath)
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		return err
+	}
+	cf.markPersisted()
+	return nil
 }
 
 // writeBinarySnapshotFile writes the binary snapshot file header and level tree.
