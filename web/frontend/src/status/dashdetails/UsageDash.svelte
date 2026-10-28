@@ -66,7 +66,7 @@
       : [{ cluster: { eq: presetCluster } }, { state: ["running"] }],
   );
   const topStatsQuery = $derived(
-    loadMe
+    loadMe && selectedHistograms
       ? queryStore({
           client: client,
           query: gql`

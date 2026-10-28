@@ -269,7 +269,8 @@
       ) || 0;
       rawInfos['cpuPwr'] = Math.floor((rawCpuPwr * 100) / 100)
 
-      let rawCpuUnit = $statusQuery?.data?.nodeMetrics[0]?.metrics.find((m) => m.name == 'cpu_power')?.metric?.unit || null
+      let rawCpuUnit = $statusQuery?.data?.nodeMetrics?.map(node =>
+        node.metrics.find(m => m.name == 'cpu_power')?.metric?.unit).find(Boolean) || null
       if (!rawInfos['cpuPwrUnitBase'])   rawInfos['cpuPwrUnitBase'] = rawCpuUnit ? rawCpuUnit.base : ''
       if (!rawInfos['cpuPwrUnitPrefix']) rawInfos['cpuPwrUnitPrefix'] = rawCpuUnit ? rawCpuUnit.prefix : ''
 
@@ -279,7 +280,8 @@
       ) || 0;
       rawInfos['gpuPwr'] = Math.floor((rawGpuPwr * 100) / 100)
 
-      let rawGpuUnit = $statusQuery?.data?.nodeMetrics[0]?.metrics.find((m) => m.name == 'acc_power')?.metric?.unit || null
+      let rawGpuUnit = $statusQuery?.data?.nodeMetrics?.map(node =>
+        node.metrics.find(m => m.name == 'acc_power')?.metric?.unit).find(Boolean) || null
       if (!rawInfos['gpuPwrUnitBase']) rawInfos['gpuPwrUnitBase'] = rawGpuUnit ? rawGpuUnit.base : ''
       if (!rawInfos['gpuPwrUnitPrefix']) rawInfos['gpuPwrUnitPrefix'] = rawGpuUnit ? rawGpuUnit.prefix : ''
     }
@@ -522,14 +524,16 @@
       <!-- Total Cluster Metric in Time SUMS-->
       <Col class="text-center">
         <h5 class="mt-2 mb-0">
+          {#if sortedClusterMetrics?.length > 0}
           Cluster Utilization (
           <span style="color: #0000ff;">
             {`${sortedClusterMetrics[0]?.name} (${sortedClusterMetrics[0]?.unit?.prefix}${sortedClusterMetrics[0]?.unit?.base})`}
-          </span>,
+          </span>{#if sortedClusterMetrics.length > 1},
           <span style="color: #ff0000;">
             {`${sortedClusterMetrics[1]?.name} (${sortedClusterMetrics[1]?.unit?.prefix}${sortedClusterMetrics[1]?.unit?.base})`}
-          </span>
+          </span>{/if}
           )
+          {/if}
         </h5>
         <div>
           {#key $statusQuery?.data?.clusterMetrics}
