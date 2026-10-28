@@ -1,12 +1,15 @@
 package tagger
 
-import ("testing";"github.com/ClusterCockpit/cc-lib/v2/schema")
+import (
+	"github.com/ClusterCockpit/cc-lib/v2/schema"
+	"testing"
+)
 
 func TestJobClassMissingMetricConfigurationDoesNotPanic(t *testing.T) {
 	tagger := &JobClassTagger{
 		rules: make(map[string]ruleInfo),
 		getStatistics: func(*schema.Job) (schema.JobStatisticsSet, error) {
-			return schema.JobStatisticsSet{Metrics:map[string]schema.JobStatistics{"removed": {Avg: 1}}}, nil
+			return schema.JobStatisticsSet{Metrics: map[string]schema.JobStatistics{"removed": {Avg: 1}}}, nil
 		},
 		getMetricConfig: func(string, string) map[string]*schema.Metric { return nil },
 	}

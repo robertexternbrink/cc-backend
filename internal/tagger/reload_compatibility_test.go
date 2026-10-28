@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
 )
 
 func TestJobClassReloadPreservesNonJSONExtensionRules(t *testing.T) {
@@ -63,4 +62,3 @@ func TestJobClassReloadReflectsDeletedRules(t *testing.T) {
 		t.Fatal("successful empty rule directory did not replace the old rules")
 	}
 }
-

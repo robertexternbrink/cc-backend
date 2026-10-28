@@ -63,8 +63,6 @@ func TestJobClassReloadRemovesDeletedParameters(t *testing.T) {
 	}
 }
 
-
-
 func TestAppReloadRejectsInvalidPattern(t *testing.T) {
 	root := t.TempDir()
 	writeReloadFile(t, root, "example.txt", "example")

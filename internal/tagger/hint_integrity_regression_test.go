@@ -1,6 +1,9 @@
 package tagger
 
-import ("testing";"github.com/ClusterCockpit/cc-lib/v2/schema")
+import (
+	"github.com/ClusterCockpit/cc-lib/v2/schema"
+	"testing"
+)
 
 func TestInvalidHintIsNotPublished(t *testing.T) {
 	tagger := &JobClassTagger{rules: make(map[string]ruleInfo)}
