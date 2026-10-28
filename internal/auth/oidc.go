@@ -226,6 +226,12 @@ func (oa *OIDC) OAuth2Callback(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// UserInfo claims must refer to the identity in the verified ID token.
+	if userInfo.Subject == "" || userInfo.Subject != idToken.Subject {
+		http.Error(rw, "OIDC subject mismatch", http.StatusUnauthorized)
+		return
+	}
+
 	// projects is populated below from ID token claims
 	var projects []string
 
