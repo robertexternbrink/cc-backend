@@ -188,15 +188,10 @@ func cleanup() {
 	}
 }
 
-/*
-* This function starts a job, stops it, and then reads its data from the job-archive.
-* Do not run sub-tests in parallel! Tests should not be run in parallel at all, because
-* at least `setup` modifies global state.
- */
-func TestRestApi(t *testing.T) {
-	restapi := setup(t)
-	t.Cleanup(cleanup)
-	testData := schema.JobData{Metrics: map[string]schema.ScopedMetrics{
+// apiTestMetricData returns a fresh response owned by one loader invocation.
+// The dispatcher rounds statistics in place before publishing a cache entry.
+func apiTestMetricData() schema.JobData {
+	return schema.JobData{Metrics: map[string]schema.ScopedMetrics{
 		"load_one": {
 			schema.MetricScopeNode: {
 				Unit:     schema.Unit{Base: "load"},
@@ -211,9 +206,47 @@ func TestRestApi(t *testing.T) {
 			},
 		},
 	}}
+}
+
+// waitForTestArchive observes the actual persisted completion status. A stopped
+// job can still be marked RunningOrArchiving until its background worker finishes.
+func waitForTestArchive(t *testing.T, jobs *repository.JobRepository, job *schema.Job) *schema.Job {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		current, err := jobs.Find(&job.JobID, &job.Cluster, &job.StartTime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch current.MonitoringStatus {
+		case schema.MonitoringStatusArchivingSuccessful:
+			return current
+		case schema.MonitoringStatusArchivingFailed:
+			t.Fatal("background archiving failed")
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("archive did not complete: %v (status %v)", ctx.Err(), current.MonitoringStatus)
+		case <-ticker.C:
+		}
+	}
+}
+
+/*
+* This function starts a job, stops it, and then reads its data from the job-archive.
+* Do not run sub-tests in parallel! Tests should not be run in parallel at all, because
+* at least `setup` modifies global state.
+ */
+func TestRestApi(t *testing.T) {
+	restapi := setup(t)
+	t.Cleanup(cleanup)
+	testData := apiTestMetricData()
 
 	metricstore.TestLoadDataCallback = func(job *schema.Job, metrics []string, scopes []schema.MetricScope, ctx context.Context, resolution int, resampleAlgo string) (schema.JobData, error) {
-		return testData, nil
+		return apiTestMetricData(), nil
 	}
 
 	r := chi.NewRouter()
@@ -355,7 +388,15 @@ func TestRestApi(t *testing.T) {
 	}
 
 	t.Run("CheckArchive", func(t *testing.T) {
-		data, err := metricdispatch.LoadData(stoppedJob, []string{"load_one"}, []schema.MetricScope{schema.MetricScopeNode}, context.Background(), 60, "")
+		archivedJob := waitForTestArchive(t, restapi.JobRepository, stoppedJob)
+		persisted, err := archive.GetHandle().LoadJobData(archivedJob)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(persisted, testData) {
+			t.Fatal("unexpected persisted archive data")
+		}
+		data, err := metricdispatch.LoadData(archivedJob, []string{"load_one"}, []schema.MetricScope{schema.MetricScopeNode}, context.Background(), 60, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -497,24 +538,8 @@ func TestStopJobWithReusedJobId(t *testing.T) {
 	restapi := setup(t)
 	t.Cleanup(cleanup)
 
-	testData := schema.JobData{Metrics: map[string]schema.ScopedMetrics{
-		"load_one": {
-			schema.MetricScopeNode: {
-				Unit:     schema.Unit{Base: "load"},
-				Timestep: 60,
-				Series: []schema.Series{
-					{
-						Hostname:   "host123",
-						Statistics: schema.MetricStatistics{Min: 0.1, Avg: 0.2, Max: 0.3},
-						Data:       []schema.Float{0.1, 0.1, 0.1, 0.2, 0.2, 0.2, 0.3, 0.3, 0.3},
-					},
-				},
-			},
-		},
-	}}
-
 	metricstore.TestLoadDataCallback = func(job *schema.Job, metrics []string, scopes []schema.MetricScope, ctx context.Context, resolution int, resampleAlgo string) (schema.JobData, error) {
-		return testData, nil
+		return apiTestMetricData(), nil
 	}
 
 	r := chi.NewRouter()
