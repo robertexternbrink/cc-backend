@@ -55,8 +55,21 @@ func ReceiveNats(ms *MemoryStore,
 		return nil
 	}
 
+	return receiveNats(ms, workers, ctx, nc)
+}
+
+type metricSubscriptionClient interface {
+    Subscribe(string, nats.MessageHandler) error
+}
+
+type metricNatsMessage struct {
+    data []byte
+    clusterTag string
+}
+
+func receiveNats(ms *MemoryStore, workers int, ctx context.Context, nc metricSubscriptionClient) error {
 	var wg sync.WaitGroup
-	msgs := make(chan []byte, max(workers*256, 8192))
+	msgs := make(chan metricNatsMessage, max(workers*256, 8192))
 
 	for _, sc := range *Keys.Subscriptions {
 		clusterTag := sc.ClusterTag
@@ -67,8 +80,8 @@ func ReceiveNats(ms *MemoryStore,
 				go func() {
 					defer wg.Done()
 					for m := range msgs {
-						dec := lineprotocol.NewDecoderWithBytes(m)
-						if err := DecodeLine(dec, ms, clusterTag); err != nil {
+						dec := lineprotocol.NewDecoderWithBytes(m.data)
+						if err := DecodeLine(dec, ms, m.clusterTag); err != nil {
 							cclog.Errorf("error: %s", err.Error())
 						}
 					}
@@ -77,7 +90,7 @@ func ReceiveNats(ms *MemoryStore,
 
 			nc.Subscribe(sc.SubscribeTo, func(subject string, data []byte) {
 				select {
-				case msgs <- data:
+				case msgs <- metricNatsMessage{data: data, clusterTag: clusterTag}:
 				case <-ctx.Done():
 				}
 			})
