@@ -84,6 +84,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
 
 	"github.com/ClusterCockpit/cc-backend/internal/config"
@@ -376,7 +377,26 @@ func LoadScopedStatsFromArchive(
 		return schema.ScopedJobStats{}, err
 	}
 
-	return data, nil
+	if len(metrics) == 0 && len(scopes) == 0 {
+		return data, nil
+	}
+	selected := schema.ScopedJobStats{Metrics: make(map[string]schema.ScopedMetricStats)}
+	for metric, scoped := range data.Metrics {
+		if len(metrics) > 0 && !slices.Contains(metrics, metric) {
+			continue
+		}
+		selectedScopes := make(schema.ScopedMetricStats)
+		for scope, statistics := range scoped {
+			if len(scopes) > 0 && !slices.Contains(scopes, scope) {
+				continue
+			}
+			selectedScopes[scope] = statistics
+		}
+		if len(selectedScopes) > 0 {
+			selected.Metrics[metric] = selectedScopes
+		}
+	}
+	return selected, nil
 }
 
 // GetStatistics returns all metric statistics for a job, including the
