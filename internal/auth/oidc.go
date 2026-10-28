@@ -297,9 +297,9 @@ func (oa *OIDC) OAuth2Callback(rw http.ResponseWriter, r *http.Request) {
 	// Collect roles from realm_access (realm roles) in the ID token
 	oidcRoles := append([]string{}, idTokenClaims.RealmAccess.Roles...)
 
-	// Also collect roles from resource_access (client roles) for all clients
-	for clientID, access := range idTokenClaims.ResourceAccess {
-		cclog.Debugf("OIDC ID token resource_access[%q] roles: %v", clientID, access.Roles)
+	// Client roles belong to their client namespace; ignore other applications.
+	if access, ok := idTokenClaims.ResourceAccess[oa.clientID]; ok && oa.clientID != "" {
+		cclog.Debugf("OIDC ID token resource_access[%q] roles: %v", oa.clientID, access.Roles)
 		oidcRoles = append(oidcRoles, access.Roles...)
 	}
 
