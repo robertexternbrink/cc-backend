@@ -193,6 +193,7 @@ func (t *JobClassTagger) prepareRule(b []byte, fns string) {
 	ri.hint, err = template.New(fns).Parse(rule.Hint)
 	if err != nil {
 		cclog.Errorf("error processing template %s: %#v", fns, err)
+		return
 	}
 	cclog.Infof("prepareRule() > processing %s with %d requirements and %d variables", fns, len(ri.requirements), len(ri.variables))
 
