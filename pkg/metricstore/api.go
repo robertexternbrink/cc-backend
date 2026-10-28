@@ -139,6 +139,9 @@ func (data *APIMetricData) ScaleBy(f schema.Float) {
 	data.Avg *= f
 	data.Min *= f
 	data.Max *= f
+	if f < 0 {
+		data.Min, data.Max = data.Max, data.Min
+	}
 	for i := 0; i < len(data.Data); i++ {
 		data.Data[i] *= f
 	}
