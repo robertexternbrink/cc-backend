@@ -23,8 +23,8 @@
 //   - Running jobs: 2 minutes (data changes frequently)
 //   - Completed jobs: 5 hours (data is static)
 //
-// The cache key is based on job ID, state, requested metrics, scopes, resolution,
-// and resample algorithm.
+// The cache key includes job ID, state, monitoring status, requested time range,
+// metrics, scopes, resolution, and resample algorithm.
 //
 // # Usage
 //
@@ -55,9 +55,8 @@ import (
 // The cache reduces load on both the metric store and archive backends.
 var cache *lrucache.Cache = lrucache.New(128 * 1024 * 1024)
 
-// cacheKey generates a unique cache key for a job's metric data based on job ID, state,
-// requested metrics, scopes, and resolution. Duration and StartTime are intentionally excluded
-// because job.ID is more unique and the cache TTL ensures entries don't persist indefinitely.
+// cacheKey includes the requested time range and monitoring state so refreshed
+// jobs cannot reuse metric data from an earlier live or archiving request.
 func cacheKey(
 	job *schema.Job,
 	metrics []string,
@@ -65,8 +64,8 @@ func cacheKey(
 	resolution int,
 	resampleAlgo string,
 ) string {
-	return fmt.Sprintf("%d(%s):[%v],[%v]-%d-%s",
-		*job.ID, job.State, metrics, scopes, resolution, resampleAlgo)
+	return fmt.Sprintf("%d(%s,%d):%d+%d:[%v],[%v]-%d-%s",
+		*job.ID, job.State, job.MonitoringStatus, job.StartTime, job.Duration, metrics, scopes, resolution, resampleAlgo)
 }
 
 // LoadData retrieves metric data for a job from the appropriate backend (memory store for running jobs,
@@ -127,7 +126,6 @@ func LoadData(job *schema.Job,
 					return err, 0, 0
 				}
 			}
-			size = plotCacheSize(jd)
 		} else {
 			var jdTemp schema.JobData
 			jdTemp, err = archive.GetHandle().LoadJobData(job)
@@ -190,11 +188,11 @@ func LoadData(job *schema.Job,
 				}
 				jd = res
 			}
-			size = plotCacheSize(jd)
 		}
 
 		ttl = 5 * time.Hour
-		if job.State == schema.JobStateRunning {
+		if job.State == schema.JobStateRunning ||
+			job.MonitoringStatus == schema.MonitoringStatusRunningOrArchiving {
 			ttl = 2 * time.Minute
 		}
 
@@ -227,6 +225,8 @@ func LoadData(job *schema.Job,
 		// Round Resulting Stat Values
 		jd.RoundMetricStats()
 
+		// Charge the cached result after selection, resampling and added statistics/scopes.
+		size = plotCacheSize(jd)
 		return jd, ttl, size
 	})
 
