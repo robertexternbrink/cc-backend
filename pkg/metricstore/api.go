@@ -139,6 +139,9 @@ func (data *APIMetricData) ScaleBy(f schema.Float) {
 	data.Avg *= f
 	data.Min *= f
 	data.Max *= f
+	if f < 0 {
+		data.Min, data.Max = data.Max, data.Min
+	}
 	for i := 0; i < len(data.Data); i++ {
 		data.Data[i] *= f
 	}
@@ -161,8 +164,12 @@ func (data *APIMetricData) PadDataWithNull(ms *MemoryStore, from, to int64, metr
 		return
 	}
 
-	if (data.From / minfo.Frequency) > (from / minfo.Frequency) {
-		padfront := int((data.From / minfo.Frequency) - (from / minfo.Frequency))
+	frequency := minfo.Frequency
+	if data.Resolution > 0 {
+		frequency = data.Resolution
+	}
+	if (data.From / frequency) > (from / frequency) {
+		padfront := int((data.From / frequency) - (from / frequency))
 		ndata := make([]schema.Float, 0, padfront+len(data.Data))
 		for range padfront {
 			ndata = append(ndata, schema.NaN)
