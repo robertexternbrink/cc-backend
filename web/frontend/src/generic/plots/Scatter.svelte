@@ -94,10 +94,8 @@
     const w = width - paddingLeft - paddingRight;
     const h = height - paddingTop - paddingBottom;
 
-    if (maxX == 0 && maxY == 0) {
-      maxX = 1;
-      maxY = 1;
-    }
+    if (maxX == 0) maxX = 1;
+    if (maxY == 0) maxY = 1;
 
     /* Value -> Pixel-Coordinate */
     const getCanvasX = (x) => {
