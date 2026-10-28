@@ -16,8 +16,13 @@ import (
 func setup(tb testing.TB) *repository.JobRepository {
 	tb.Helper()
 	cclog.Init("warn", true)
-	dbfile := "../repository/testdata/job.db"
-	err := repository.MigrateDB(dbfile)
+	noErr(tb, repository.ResetConnection())
+	data, err := os.ReadFile("../repository/testdata/job.db")
+	noErr(tb, err)
+	dbfile := filepath.Join(tb.TempDir(), "jobs.db")
+	noErr(tb, os.WriteFile(dbfile, data, 0o600))
+	tb.Cleanup(func() { noErr(tb, repository.ResetConnection()) })
+	err = repository.MigrateDB(dbfile)
 	noErr(tb, err)
 	repository.Connect(dbfile)
 	return repository.GetJobRepository()
