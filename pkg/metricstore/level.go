@@ -160,9 +160,6 @@ func (l *Level) freeAndCheckEmpty(t int64) (int, bool, error) {
 			delme, m := b.free(t)
 			n += m
 			if delme {
-				if cap(b.data) != BufferCap {
-					b.data = make([]schema.Float, 0, BufferCap)
-				}
 				b.lastUsed = time.Now().Unix()
 				bufferPool.Put(b)
 				l.metrics[i] = nil
@@ -293,9 +290,6 @@ func (l *Level) forceFree() (int, error) {
 			if delme {
 				b.next = nil
 				b.prev = nil
-				if cap(b.data) != BufferCap {
-					b.data = make([]schema.Float, 0, BufferCap)
-				}
 				b.lastUsed = time.Now().Unix()
 				bufferPool.Put(b)
 				l.metrics[i] = nil

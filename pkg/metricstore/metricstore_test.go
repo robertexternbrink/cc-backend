@@ -987,11 +987,11 @@ func TestBufferPoolClean(t *testing.T) {
 	now := time.Now().Unix()
 
 	// Create some buffers and put them in the pool with different lastUsed times
-	b1 := &buffer{lastUsed: now - 3600, data: make([]schema.Float, 0)}   // 1 hour ago
-	b2 := &buffer{lastUsed: now - 7200, data: make([]schema.Float, 0)}   // 2 hours ago
-	b3 := &buffer{lastUsed: now - 180000, data: make([]schema.Float, 0)} // 50 hours ago
-	b4 := &buffer{lastUsed: now - 200000, data: make([]schema.Float, 0)} // 55 hours ago
-	b5 := &buffer{lastUsed: now, data: make([]schema.Float, 0)}
+	b1 := &buffer{lastUsed: now - 3600, data: make([]schema.Float, 0, BufferCap)}   // 1 hour ago
+	b2 := &buffer{lastUsed: now - 7200, data: make([]schema.Float, 0, BufferCap)}   // 2 hours ago
+	b3 := &buffer{lastUsed: now - 180000, data: make([]schema.Float, 0, BufferCap)} // 50 hours ago
+	b4 := &buffer{lastUsed: now - 200000, data: make([]schema.Float, 0, BufferCap)} // 55 hours ago
+	b5 := &buffer{lastUsed: now, data: make([]schema.Float, 0, BufferCap)}
 
 	pool.Put(b1)
 	pool.Put(b2)
