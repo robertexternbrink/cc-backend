@@ -14,7 +14,7 @@ import (
 func TestRestoredCheckpointIncludesAcceptedOverwrite(t *testing.T) {
 	ms := newDeviceTestStore()
 	cf := &CheckpointFile{Metrics: map[string]*CheckpointMetrics{
-		"fs_read_bw": {Frequency: 60, Start: 90, Data: []schema.Float{1, 2}},
+		"fs_read_bw": {Frequency: 60, Start: 120, Data: []schema.Float{1, 2}},
 	}}
 	if err := ms.root.loadFile(cf, ms); err != nil {
 		t.Fatal(err)

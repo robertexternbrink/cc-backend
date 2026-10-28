@@ -494,7 +494,7 @@ func (l *Level) loadFile(cf *CheckpointFile, m *MemoryStore) error {
 		n := len(metric.Data)
 		b := &buffer{
 			frequency: metric.Frequency,
-			start:     metric.Start,
+			start:     metric.Start - metric.Frequency/2,
 			data:      metric.Data[0:n:n],
 			prev:      nil,
 			next:      nil,
