@@ -164,7 +164,7 @@ func (r *JobRepository) buildStatsQuery(
 	}
 
 	if need("totalWalltime") {
-		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s) / 3600) as int) as totalWalltime`, durationExpr))
+		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s) / 3600.0) as int) as totalWalltime`, durationExpr))
 	} else {
 		columns = append(columns, "0 as totalWalltime")
 	}
@@ -176,7 +176,7 @@ func (r *JobRepository) buildStatsQuery(
 	}
 
 	if need("totalNodeHours") {
-		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_nodes) / 3600) as int) as totalNodeHours`, durationExpr))
+		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_nodes) / 3600.0) as int) as totalNodeHours`, durationExpr))
 	} else {
 		columns = append(columns, "0 as totalNodeHours")
 	}
@@ -188,7 +188,7 @@ func (r *JobRepository) buildStatsQuery(
 	}
 
 	if need("totalCoreHours") {
-		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_hwthreads) / 3600) as int) as totalCoreHours`, durationExpr))
+		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_hwthreads) / 3600.0) as int) as totalCoreHours`, durationExpr))
 	} else {
 		columns = append(columns, "0 as totalCoreHours")
 	}
@@ -200,7 +200,7 @@ func (r *JobRepository) buildStatsQuery(
 	}
 
 	if need("totalAccHours") {
-		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_acc) / 3600) as int) as totalAccHours`, durationExpr))
+		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_acc) / 3600.0) as int) as totalAccHours`, durationExpr))
 	} else {
 		columns = append(columns, "0 as totalAccHours")
 	}
