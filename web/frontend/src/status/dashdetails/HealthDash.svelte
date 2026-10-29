@@ -6,7 +6,7 @@
 -->
 
  <script>
-  import { onMount } from "svelte";
+  import { getContext, onMount } from "svelte";
   import {
     Row,
     Col,
@@ -34,6 +34,7 @@
 
   /* Const Init */
   const client = getContextClient();
+  const colorblindMode = getContext("cc-config").plotConfiguration_colorblindMode;
   const healthOptions = [
     "all",
     "full",
@@ -90,8 +91,12 @@
 
   let healthTableData = $derived.by(() => {
     if ($statusQuery?.data) {
+      const [field, sorting] = Object.entries(healthTableSorting).find(([, state]) => state.active)
+        || ["healthState", {dir: "down"}];
       return [...$statusQuery.data.nodes.items].sort((n1, n2) => {
-        return n1['healthState'].localeCompare(n2['healthState'])
+        return sorting.dir == "down"
+          ? n1[field].localeCompare(n2[field])
+          : n2[field].localeCompare(n1[field]);
       });
     } else {
       return [];
@@ -209,7 +214,7 @@
           </tr>
           {#each refinedStateData as sd, i}
             <tr>
-              <td><Icon name="circle-fill" style="color: {colors['nodeStates'][sd.state]};"/></td>
+              <td><Icon name="circle-fill" style="color: {colorblindMode ? colors.colorblind[i] : colors['nodeStates'][sd.state]};"/></td>
               <td>{sd.state}</td>
               <td>{sd.count}</td>
             </tr>
@@ -251,7 +256,7 @@
           </tr>
           {#each refinedHealthData as hd, i}
             <tr>
-              <td><Icon name="circle-fill"style="color: {colors['healthStates'][hd.state]};" /></td>
+              <td><Icon name="circle-fill"style="color: {colorblindMode ? colors.colorblind[i] : colors['healthStates'][hd.state]};" /></td>
               <td>{hd.state}</td>
               <td>{hd.count}</td>
             </tr>
