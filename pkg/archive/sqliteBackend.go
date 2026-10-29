@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"text/tabwriter"
 	"time"
 
@@ -37,8 +38,10 @@ type SqliteArchiveConfig struct {
 //
 // Uses WAL (Write-Ahead Logging) mode for better concurrency and a 64MB cache.
 type SqliteArchive struct {
-	db       *sql.DB  // SQLite database connection
-	clusters []string // List of discovered cluster names
+	db        *sql.DB       // SQLite database connection
+	clusters  []string      // List of discovered cluster names
+	payloadMu sync.RWMutex  // Serializes payload writes with decoder-cache reads
+	cacheID   atomic.Uint64 // Separates archive instances and successful bulk cleanups
 }
 
 // sqliteSchema defines the database schema for SQLite archive backend.
@@ -77,6 +80,8 @@ CREATE TABLE IF NOT EXISTS metadata (
 `
 
 func (sa *SqliteArchive) Init(rawConfig json.RawMessage) (uint64, error) {
+	sa.payloadMu.Lock()
+	defer sa.payloadMu.Unlock()
 	var cfg SqliteArchiveConfig
 	if err := json.Unmarshal(rawConfig, &cfg); err != nil {
 		cclog.Warnf("SqliteArchive Init() > Unmarshal error: %#v", err)
@@ -160,6 +165,7 @@ func (sa *SqliteArchive) Init(rawConfig json.RawMessage) (uint64, error) {
 		sa.clusters = append(sa.clusters, cluster)
 	}
 
+	sa.cacheID.Store(sqlitePayloadCacheID.Add(1))
 	cclog.Infof("SqliteArchive initialized with database '%s', found %d clusters", cfg.DBPath, len(sa.clusters))
 	return version, nil
 }
@@ -246,6 +252,8 @@ func (sa *SqliteArchive) LoadJobMeta(job *schema.Job) (*schema.Job, error) {
 }
 
 func (sa *SqliteArchive) LoadJobData(job *schema.Job) (schema.JobData, error) {
+	sa.payloadMu.RLock()
+	defer sa.payloadMu.RUnlock()
 	var dataBlob []byte
 	var compressed bool
 	err := sa.db.QueryRow("SELECT data_json, data_compressed FROM jobs WHERE job_id = ? AND cluster = ? AND start_time = ?",
@@ -254,7 +262,7 @@ func (sa *SqliteArchive) LoadJobData(job *schema.Job) (schema.JobData, error) {
 		cclog.Errorf("SqliteArchive LoadJobData() > query error: %v", err)
 		return schema.JobData{}, err
 	}
-	key := fmt.Sprintf("%s:%d:%d", job.Cluster, job.JobID, job.StartTime)
+	key := sa.payloadCacheKey(job, config.Keys.Validate)
 
 	var reader io.Reader = bytes.NewReader(dataBlob)
 	if compressed {
@@ -279,6 +287,8 @@ func (sa *SqliteArchive) LoadJobData(job *schema.Job) (schema.JobData, error) {
 }
 
 func (sa *SqliteArchive) LoadJobStats(job *schema.Job) (schema.ScopedJobStats, error) {
+	sa.payloadMu.RLock()
+	defer sa.payloadMu.RUnlock()
 	var dataBlob []byte
 	var compressed bool
 	err := sa.db.QueryRow("SELECT data_json, data_compressed FROM jobs WHERE job_id = ? AND cluster = ? AND start_time = ?",
@@ -287,7 +297,7 @@ func (sa *SqliteArchive) LoadJobStats(job *schema.Job) (schema.ScopedJobStats, e
 		cclog.Errorf("SqliteArchive LoadJobStats() > query error: %v", err)
 		return schema.ScopedJobStats{}, err
 	}
-	key := fmt.Sprintf("%s:%d:%d", job.Cluster, job.JobID, job.StartTime)
+	key := sa.payloadCacheKey(job, config.Keys.Validate)
 
 	var reader io.Reader = bytes.NewReader(dataBlob)
 	if compressed {
@@ -384,6 +394,8 @@ func (sa *SqliteArchive) ImportJob(jobMeta *schema.Job, jobData *schema.JobData)
 		compressed = false
 	}
 
+	sa.payloadMu.Lock()
+	defer sa.payloadMu.Unlock()
 	now := time.Now().Unix()
 	_, err := sa.db.Exec(`
 		INSERT INTO jobs (job_id, cluster, start_time, meta_json, data_json, data_compressed, created_at, updated_at)
@@ -399,6 +411,7 @@ func (sa *SqliteArchive) ImportJob(jobMeta *schema.Job, jobData *schema.JobData)
 		return err
 	}
 
+	sa.invalidateJobPayloads(jobMeta)
 	return nil
 }
 
@@ -407,6 +420,8 @@ func (sa *SqliteArchive) GetClusters() []string {
 }
 
 func (sa *SqliteArchive) CleanUp(jobs []*schema.Job) {
+	sa.payloadMu.Lock()
+	defer sa.payloadMu.Unlock()
 	start := time.Now()
 	count := 0
 
@@ -424,6 +439,7 @@ func (sa *SqliteArchive) CleanUp(jobs []*schema.Job) {
 	}
 	defer stmt.Close()
 
+	deleted := make([]*schema.Job, 0, len(jobs))
 	for _, job := range jobs {
 		if job == nil {
 			cclog.Errorf("SqliteArchive CleanUp() error: job is nil")
@@ -434,12 +450,17 @@ func (sa *SqliteArchive) CleanUp(jobs []*schema.Job) {
 			cclog.Errorf("SqliteArchive CleanUp() > delete error: %v", err)
 		} else {
 			count++
+			deleted = append(deleted, job)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		cclog.Errorf("SqliteArchive CleanUp() > commit error: %v", err)
 		return
+	}
+
+	for _, job := range deleted {
+		sa.invalidateJobPayloads(job)
 	}
 
 	cclog.Infof("Retention Service - Remove %d jobs from SQLite in %s", count, time.Since(start))
@@ -452,6 +473,8 @@ func (sa *SqliteArchive) Move(jobs []*schema.Job, targetPath string) {
 }
 
 func (sa *SqliteArchive) Clean(before int64, after int64) {
+	sa.payloadMu.Lock()
+	defer sa.payloadMu.Unlock()
 	if after == 0 {
 		after = math.MaxInt64
 	}
@@ -461,11 +484,16 @@ func (sa *SqliteArchive) Clean(before int64, after int64) {
 		cclog.Fatalf("SqliteArchive Clean() > delete error: %s", err.Error())
 	}
 
+	// Bulk deletion retires this archive namespace after the database write.
+	// Existing bounded LRU entries expire normally but can no longer be reused.
+	sa.cacheID.Store(sqlitePayloadCacheID.Add(1))
 	rowsAffected, _ := result.RowsAffected()
 	cclog.Infof("SqliteArchive Clean() removed %d jobs", rowsAffected)
 }
 
 func (sa *SqliteArchive) Compress(jobs []*schema.Job) {
+	sa.payloadMu.Lock()
+	defer sa.payloadMu.Unlock()
 	var cnt int
 	start := time.Now()
 
@@ -603,8 +631,10 @@ func (sa *SqliteArchive) Iter(loadMetricData bool) <-chan JobContainer {
 							reader = bytes.NewReader(decompressed)
 						}
 
-						key := fmt.Sprintf("%s:%d:%d", job.Cluster, job.JobID, job.StartTime)
-						jobData, err := DecodeJobData(reader, key)
+						// Iterator rows are snapshots that may predate a concurrent import.
+						// Decode their own payload without seeding current-version caches.
+						var jobData schema.JobData
+						err := json.NewDecoder(reader).Decode(&jobData)
 						if err != nil {
 							cclog.Errorf("SqliteArchive Iter() > decode data error: %v", err)
 							ch <- JobContainer{Meta: job, Data: nil}
