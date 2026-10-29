@@ -342,7 +342,7 @@ func Shutdown() {
 
 // Retention starts a background goroutine that periodically frees old metric data.
 //
-// This worker runs at half the retention interval and calls Free() to remove buffers
+// This worker runs at half the retention interval, capped at five minutes, and calls Free() to remove buffers
 // older than the configured retention time. It respects the NodeProvider to preserve
 // data for nodes with active jobs.
 //
@@ -363,7 +363,9 @@ func Retention(wg *sync.WaitGroup, ctx context.Context) {
 			return
 		}
 
-		tickInterval := d / 2
+		// A long history window must not defer cleanup for half that window.
+		// Preserve the existing faster cadence for short retention durations.
+		tickInterval := min(d/2, 5*time.Minute)
 		if tickInterval <= 0 {
 			return
 		}
