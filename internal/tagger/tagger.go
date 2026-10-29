@@ -71,16 +71,24 @@ func newTagger() {
 	jobTagger.stopTaggers = make([]Tagger, 0)
 	jobTagger.stopTaggers = append(jobTagger.stopTaggers, &JobClassTagger{})
 
+	registeredStart := jobTagger.startTaggers[:0]
 	for _, tagger := range jobTagger.startTaggers {
 		if err := tagger.Register(); err != nil {
 			cclog.Errorf("failed to register start tagger: %s", err)
+			continue
 		}
+		registeredStart = append(registeredStart, tagger)
 	}
+	jobTagger.startTaggers = registeredStart
+	registeredStop := jobTagger.stopTaggers[:0]
 	for _, tagger := range jobTagger.stopTaggers {
 		if err := tagger.Register(); err != nil {
 			cclog.Errorf("failed to register stop tagger: %s", err)
+			continue
 		}
+		registeredStop = append(registeredStop, tagger)
 	}
+	jobTagger.stopTaggers = registeredStop
 }
 
 // Init initializes the job tagger system and registers it with the job repository.
