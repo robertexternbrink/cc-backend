@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -45,7 +46,7 @@ func freeMetrics(rw http.ResponseWriter, r *http.Request) {
 
 	to, err := strconv.ParseInt(rawTo, 10, 64)
 	if err != nil {
-		handleError(err, http.StatusInternalServerError, rw)
+		handleError(err, http.StatusBadRequest, rw)
 		return
 	}
 
@@ -111,6 +112,12 @@ func writeMetrics(rw http.ResponseWriter, r *http.Request) {
 // queryParam extracts a single query-parameter value from a raw query string
 // without allocating a url.Values map. Returns "" if the key is not present.
 func queryParam(raw, key string) string {
+	if strings.ContainsAny(raw, "%+;") {
+		// Keep standard URL decoding and invalid-parameter handling for escaped
+		// queries, while the usual plain cluster parameter needs no map.
+		values, _ := url.ParseQuery(raw)
+		return values.Get(key)
+	}
 	for raw != "" {
 		var kv string
 		kv, raw, _ = strings.Cut(raw, "&")
