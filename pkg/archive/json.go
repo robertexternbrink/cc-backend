@@ -11,6 +11,7 @@ import (
 	"time"
 
 	cclog "github.com/ClusterCockpit/cc-lib/v2/ccLogger"
+	"github.com/ClusterCockpit/cc-lib/v2/lrucache"
 	"github.com/ClusterCockpit/cc-lib/v2/schema"
 )
 
@@ -33,16 +34,37 @@ func DecodeJobData(r io.Reader, k string) (schema.JobData, error) {
 	return data.(schema.JobData), nil
 }
 
+// statsCache retains compact summaries independently of raw archive arrays.
+// A first cache miss still uses the existing reader; subsequent statistics
+// requests do not decode all samples again after the raw entry is evicted.
+var statsCache = lrucache.New(8 * 1024 * 1024)
+
 func DecodeJobStats(r io.Reader, k string) (schema.ScopedJobStats, error) {
-	jobData, err := DecodeJobData(r, k)
-	if err != nil {
+	value := statsCache.Get(k, func() (any, time.Duration, int) {
+		jobData, err := DecodeJobData(r, k)
+		if err != nil {
+			return err, 0, 0
+		}
+		stats := schema.ScopedJobStats{Metrics: scopedStatsFromMetrics(jobData.Metrics)}
+		size := 128
+		for name, scopes := range stats.Metrics {
+			size += 256 + len(name)
+			for scope, series := range scopes {
+				size += 128 + len(scope)
+				for _, entry := range series {
+					size += 192 + len(entry.Hostname)
+					if entry.ID != nil {
+						size += len(*entry.ID)
+					}
+				}
+			}
+		}
+		return stats, time.Hour, size
+	})
+	if err, ok := value.(error); ok {
 		return schema.ScopedJobStats{}, err
 	}
-
-	// Convert schema.JobData to schema.ScopedJobStats
-	return schema.ScopedJobStats{
-		Metrics: scopedStatsFromMetrics(jobData.Metrics),
-	}, nil
+	return value.(schema.ScopedJobStats), nil
 }
 
 // scopedStatsFromMetrics reduces the full time series of every metric/scope to
@@ -59,10 +81,19 @@ func scopedStatsFromMetrics(metrics map[string]schema.ScopedMetrics) map[string]
 
 			series := make([]*schema.ScopedStats, 0, len(jobMetric.Series))
 			for i := range jobMetric.Series {
+				// Own the scalars rather than pointing into the Series backing
+				// array, which would keep every raw Data slice reachable.
+				entry := jobMetric.Series[i]
+				summary := entry.Statistics
+				var id *string
+				if entry.ID != nil {
+					value := *entry.ID
+					id = &value
+				}
 				series = append(series, &schema.ScopedStats{
-					Hostname: jobMetric.Series[i].Hostname,
-					ID:       jobMetric.Series[i].ID,
-					Data:     &jobMetric.Series[i].Statistics,
+					Hostname: entry.Hostname,
+					ID:       id,
+					Data:     &summary,
 				})
 			}
 			scoped[scope] = series
