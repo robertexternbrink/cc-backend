@@ -382,7 +382,7 @@ func (r *JobRepository) FetchEnergyFootprint(job *schema.Job) (map[string]float6
 		return nil, fmt.Errorf("failed to unmarshal energy footprint for job %d: %w", *job.ID, err)
 	}
 
-	r.cache.Put(cachekey, job.EnergyFootprint, len(job.EnergyFootprint), 24*time.Hour)
+	r.cache.Put(cachekey, job.EnergyFootprint, len(job.RawEnergyFootprint), 24*time.Hour)
 	cclog.Debugf("Timer FetchEnergyFootprint %s", time.Since(start))
 	return job.EnergyFootprint, nil
 }
