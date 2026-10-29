@@ -521,7 +521,7 @@ export function transformDataForRoofline(flopsAny, memBw) { // Uses Metric Objec
     let data = null
     const x = [], y = [], c = []
 
-    if (flopsAny && memBw) {
+    if (flopsAny?.series?.length && memBw?.series?.length) {
         const nodes = flopsAny.series.length
         const timesteps = flopsAny.series[0].data.length
 
@@ -557,7 +557,7 @@ export function transformPerNodeDataForRoofline(nodes) {
     for (let node of nodes) {
         let flopsAny = node.metrics.find(m => m.name == 'flops_any' && m.scope == 'node')?.metric
         let memBw    = node.metrics.find(m => m.name == 'mem_bw'    && m.scope == 'node')?.metric
-        if (!flopsAny || !memBw) {
+        if (!flopsAny?.series?.length || !memBw?.series?.length) {
             console.warn("transformPerNodeData: metrics for 'mem_bw' and/or 'flops_any' missing!")
             continue
         }

@@ -46,7 +46,8 @@
 
   /* Effects */
   $effect(() => {
-    sizeChanged(width, height);
+    // Svelte tracks synchronous reads; the delayed draw alone cannot track props.
+    sizeChanged(width, height, X, Y, S, color, xLabel, yLabel);
   });
 
   /* Functions */
@@ -94,10 +95,8 @@
     const w = width - paddingLeft - paddingRight;
     const h = height - paddingTop - paddingBottom;
 
-    if (maxX == 0 && maxY == 0) {
-      maxX = 1;
-      maxY = 1;
-    }
+    if (maxX == 0) maxX = 1;
+    if (maxY == 0) maxY = 1;
 
     /* Value -> Pixel-Coordinate */
     const getCanvasX = (x) => {
