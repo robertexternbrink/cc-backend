@@ -135,7 +135,7 @@
 
   /* On Mount */
   onMount(() => {
-    new Chart(
+    const chart = new Chart(
       document.getElementById(canvasId),
       {
         type: 'pie',
@@ -143,6 +143,7 @@
         options: options
       }
     );
+    return () => chart.destroy();
 	});
 </script>
 
