@@ -164,7 +164,7 @@ func (r *JobRepository) buildStatsQuery(
 	}
 
 	if need("totalWalltime") {
-		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s) / 3600) as int) as totalWalltime`, durationExpr))
+		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s) / 3600.0) as int) as totalWalltime`, durationExpr))
 	} else {
 		columns = append(columns, "0 as totalWalltime")
 	}
@@ -176,7 +176,7 @@ func (r *JobRepository) buildStatsQuery(
 	}
 
 	if need("totalNodeHours") {
-		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_nodes) / 3600) as int) as totalNodeHours`, durationExpr))
+		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_nodes) / 3600.0) as int) as totalNodeHours`, durationExpr))
 	} else {
 		columns = append(columns, "0 as totalNodeHours")
 	}
@@ -188,7 +188,7 @@ func (r *JobRepository) buildStatsQuery(
 	}
 
 	if need("totalCoreHours") {
-		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_hwthreads) / 3600) as int) as totalCoreHours`, durationExpr))
+		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_hwthreads) / 3600.0) as int) as totalCoreHours`, durationExpr))
 	} else {
 		columns = append(columns, "0 as totalCoreHours")
 	}
@@ -200,7 +200,7 @@ func (r *JobRepository) buildStatsQuery(
 	}
 
 	if need("totalAccHours") {
-		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_acc) / 3600) as int) as totalAccHours`, durationExpr))
+		columns = append(columns, fmt.Sprintf(`CAST(ROUND(SUM(%s * job.num_acc) / 3600.0) as int) as totalAccHours`, durationExpr))
 	} else {
 		columns = append(columns, "0 as totalAccHours")
 	}
@@ -392,8 +392,11 @@ func (r *JobRepository) JobsStats(
 				TotalJobs:      int(jobs.Int64),
 				TotalUsers:     int(users.Int64),
 				TotalWalltime:  int(walltime.Int64),
+				TotalNodes:     int(nodes.Int64),
 				TotalNodeHours: totalNodeHours,
+				TotalCores:     int(cores.Int64),
 				TotalCoreHours: totalCoreHours,
+				TotalAccs:      int(accs.Int64),
 				TotalAccHours:  totalAccHours,
 				RunningJobs:    int(runningJobs.Int64),
 				ShortJobs:      int(shortJobs.Int64),
@@ -643,7 +646,7 @@ func (r *JobRepository) AddHistograms(
 		targetBinSize = 43200
 	default: // 24h
 		targetBinCount = 24
-		targetBinSize = 3600
+		targetBinSize = 86400
 	}
 
 	// Run all 4 histogram queries in parallel — each writes a distinct struct field.

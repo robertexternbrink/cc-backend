@@ -360,7 +360,8 @@ func BuildWhereClause(filter *model.JobFilter, query sq.SelectBuilder) sq.Select
 	// Indices on Tag Table
 	if filter.Tags != nil {
 		// This is an OR-Logic query: Returns all distinct jobs with at least one of the requested tags; TODO: AND-Logic query?
-		query = query.Join("jobtag ON jobtag.job_id = job.id").Where(sq.Eq{"jobtag.tag_id": filter.Tags}).Distinct()
+		subquery := sq.Select("jobtag.job_id").From("jobtag").Where(sq.Eq{"jobtag.tag_id": filter.Tags})
+		query = query.Where(sq.Expr("job.id IN (?)", subquery))
 	}
 	// No explicit Indices
 	if filter.JobID != nil {
