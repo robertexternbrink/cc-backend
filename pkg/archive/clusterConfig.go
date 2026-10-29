@@ -35,7 +35,7 @@ func initClusterConfig() error {
 			return fmt.Errorf("failed to load cluster config for '%s': %w", c, err)
 		}
 
-		if len(cluster.Name) == 0 {
+		if cluster == nil || len(cluster.Name) == 0 {
 			return fmt.Errorf("cluster name is empty in config for '%s'", c)
 		}
 		if len(cluster.MetricConfig) == 0 {
@@ -45,8 +45,14 @@ func initClusterConfig() error {
 			return fmt.Errorf("cluster '%s' has no subclusters defined", cluster.Name)
 		}
 
+		for _, sc := range cluster.SubClusters {
+			if sc == nil {
+				return fmt.Errorf("cluster %q contains a null subcluster", cluster.Name)
+			}
+		}
+
 		for _, mc := range cluster.MetricConfig {
-			if len(mc.Name) == 0 {
+			if mc == nil || len(mc.Name) == 0 {
 				return fmt.Errorf("cluster '%s' has a metric config with empty name", cluster.Name)
 			}
 			if mc.Timestep < 1 {
@@ -75,6 +81,9 @@ func initClusterConfig() error {
 			scLookup := make(map[string]*schema.SubClusterConfig)
 
 			for _, scc := range mc.SubClusters {
+				if scc == nil {
+					return fmt.Errorf("metric %q contains a null subcluster override", mc.Name)
+				}
 				scLookup[scc.Name] = scc
 			}
 
@@ -284,7 +293,7 @@ func GetSubClusterByNode(cluster, hostname string) (string, error) {
 		return "", fmt.Errorf("ARCHIVE/CLUSTERCONFIG > unkown cluster: %v", cluster)
 	}
 
-	if c.SubClusters[0].Nodes == "" {
+	if len(c.SubClusters) > 0 && c.SubClusters[0].Nodes == "*" {
 		return c.SubClusters[0].Name, nil
 	}
 

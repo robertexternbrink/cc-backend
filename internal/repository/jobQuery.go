@@ -561,7 +561,7 @@ func buildResourceJSONCondition(jsonField string, cond *model.StringInput, query
 		return query.Where("EXISTS (SELECT 1 FROM json_each(job.resources) WHERE json_extract(value, \"$."+jsonField+"\") != ?)", *cond.Neq)
 	}
 	if cond.StartsWith != nil { // Currently Unused
-		return query.Where("EXISTS (SELECT 1 FROM json_each(job.resources) WHERE json_extract(value, \"$."+jsonField+"\")) LIKE ?)", fmt.Sprint(*cond.StartsWith, "%"))
+		return query.Where("EXISTS (SELECT 1 FROM json_each(job.resources) WHERE json_extract(value, \"$."+jsonField+"\") LIKE ?)", fmt.Sprint(*cond.StartsWith, "%"))
 	}
 	if cond.EndsWith != nil { // Currently Unused
 		return query.Where("EXISTS (SELECT 1 FROM json_each(job.resources) WHERE json_extract(value, \"$."+jsonField+"\") LIKE ?)", fmt.Sprint("%", *cond.EndsWith))
