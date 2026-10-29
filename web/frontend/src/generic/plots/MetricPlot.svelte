@@ -135,7 +135,7 @@
     // X
     if (forNode === true) {
       // Negative Timestamp Buildup
-      for (let i = 0; i <= longestSeries; i++) {
+      for (let i = 0; i < longestSeries; i++) {
         pendingData[0][i] = (longestSeries - i) * timestep * -1;
       }
     } else {
@@ -519,6 +519,7 @@
             u.ctx.moveTo(u.bbox.left, y);
             u.ctx.lineTo(u.bbox.left + u.bbox.width, y);
             u.ctx.stroke();
+            u.ctx.restore();
             u.ctx.restore();
           },
         ],
