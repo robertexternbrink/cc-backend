@@ -58,11 +58,17 @@ type rateLimiterEntry struct {
 	lastUsed time.Time
 }
 
-var ipUserLimiters sync.Map
+var (
+	ipUserLimiters      sync.Map
+	ipUserLimitersMutex sync.Mutex
+)
 
 // getIPUserLimiter returns a rate limiter for the given IP and username combination.
 // Rate limiters are created on demand and track 5 attempts per 15 minutes.
 func getIPUserLimiter(ip, username string) *rate.Limiter {
+	ipUserLimitersMutex.Lock()
+	defer ipUserLimitersMutex.Unlock()
+
 	key := ip + ":" + username
 	now := time.Now()
 
@@ -83,6 +89,8 @@ func getIPUserLimiter(ip, username string) *rate.Limiter {
 
 // cleanupOldRateLimiters removes rate limiters that haven't been used recently
 func cleanupOldRateLimiters(olderThan time.Time) {
+	ipUserLimitersMutex.Lock()
+	defer ipUserLimitersMutex.Unlock()
 	ipUserLimiters.Range(func(key, value any) bool {
 		entry := value.(*rateLimiterEntry)
 		if entry.lastUsed.Before(olderThan) {
